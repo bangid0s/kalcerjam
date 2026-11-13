@@ -5,7 +5,7 @@ import {
   bracketSizeFor, firstRound, nextSlot, prelimPairs, propagate, rankPrelims, roundCount, roundLabel,
   smokeApply, smokeBattle, smokeLeaders, smokeStart, type Pairing, type Smoke,
 } from "@/lib/tournament";
-import { entryName, loadBoard, must, sb, tallyFor, useLive, PHASES, type Battle, type Board, type Category, type Entry, type Payment, type ScoreRow, type Vote } from "./data";
+import { entryName, loadBoard, must, runOrder, sb, tallyFor, useLive, PHASES, type Battle, type Board, type Category, type Entry, type Payment, type ScoreRow, type Vote } from "./data";
 import { BracketView, SmokeView } from "./boards";
 import { Btn, Card, Notice, Pill, useAction } from "./ui";
 
@@ -52,9 +52,9 @@ export async function putOnStage(b: Battle | null) {
   if (b) await must(sb().from("kj_battles").update({ status: "live" }).eq("id", b.id));
 }
 
-export function Comp({ isAdmin = false }: { isAdmin?: boolean }) {
+export function Comp({ isAdmin = false, initial = null }: { isAdmin?: boolean; initial?: string | null }) {
   const { data, error, reload } = useLive(loadComp, ["kj_battles", "kj_smoke", "kj_categories", "kj_votes", "kj_scores", "kj_entries"], 8000);
-  const [slug, setSlug] = useState<string | null>(null);
+  const [slug, setSlug] = useState<string | null>(initial);
   if (error) return <Notice kind="err">{error}</Notice>;
   if (!data) return <p>Loading…</p>;
   const cat = data.board.cats.find((c) => c.slug === slug) ?? data.board.cats[0];
@@ -110,14 +110,7 @@ function CategoryPanel({ d, cat, reload }: { d: CompData; cat: Category; reload:
     }, "Category reset.");
   };
 
-  const startPrelims = () => go(async () => {
-    const pool = conf.filter((e) => !e.invited).map((e) => e.id);
-    if (pool.length < 2) throw new Error("Need at least 2 confirmed dancers for prelims.");
-    const rows = prelimPairs(pool).map((p, i) => ({ category: cat.slug, kind: "prelim", round: 1, slot: i + 1, a_entry: p.a, b_entry: p.b }));
-    await must(sb().from("kj_battles").insert(rows));
-    await must(sb().from("kj_categories").update({ phase: "prelims" }).eq("slug", cat.slug));
-    await log("prelims.start", { category: cat.slug, heats: rows.length });
-  }, "Prelim heats drawn.");
+  const startPrelims = () => go(() => drawPrelims(d, cat), "Prelim heats drawn.");
 
   return (
     <div className="space-y-5">
@@ -275,7 +268,7 @@ function Prelims({ d, cat, reload }: { d: CompData; cat: Category; reload: () =>
 
 const toPairing = (b: Battle): Pairing => ({ round: b.round, slot: b.slot, a: b.a_entry, b: b.b_entry, winner: b.winner_entry });
 
-async function buildBracket(cat: Category, seeded: number[]) {
+export async function buildBracket(cat: Category, seeded: number[]) {
   if (seeded.length < 2) throw new Error("Need at least 2 dancers for a bracket.");
   const size = bracketSizeFor(seeded.length, cat.bracket_size);
   const top = seeded.slice(0, size);
@@ -291,7 +284,7 @@ async function buildBracket(cat: Category, seeded: number[]) {
 }
 
 /** Save a result (or undo one) and push winners forward through the bracket. */
-async function decideBracket(d: CompData, cat: Category, battle: Battle, winner: number | null, walkover = false) {
+export async function decideBracket(d: CompData, cat: Category, battle: Battle, winner: number | null, walkover = false) {
   const size = cat.bracket_size;
   const mine = d.board.battles.filter((b) => b.category === cat.slug && b.kind === "bracket");
   const n = nextSlot(size, battle.round, battle.slot);
@@ -394,14 +387,7 @@ function SmokeLineup({ d, cat, pool, reload, label, before }: { d: CompData; cat
   const { busy, run, note } = useAction();
   const move = (i: number, dir: -1 | 1) => { const a = [...order]; [a[i], a[i + dir]] = [a[i + dir], a[i]]; setOrder(a); };
   const start = () => run(async () => {
-    if (order.length < 2) throw new Error("Need at least 2 dancers.");
-    const s = smokeStart(order);
-    await must(sb().from("kj_battles").delete().eq("category", cat.slug).eq("kind", "smoke"));
-    await must(sb().from("kj_smoke").upsert({ category: cat.slug, lineup: order, on_floor: s.onFloor, queue: s.queue, points: s.points, champion: null, started_at: new Date().toISOString() }));
-    const bt = smokeBattle(s)!;
-    await must(sb().from("kj_battles").insert({ category: cat.slug, kind: "smoke", round: 1, slot: 1, a_entry: bt.a, b_entry: bt.b }));
-    await must(sb().from("kj_categories").update({ phase: "smoke" }).eq("slug", cat.slug));
-    await log("smoke.start", { category: cat.slug, order });
+    await startSmoke(cat, order);
     await reload();
   });
   if (!open) return <Btn kind="ink" onClick={() => { before?.(); setOrder(pool); setOpen(true); }}>{label}</Btn>;
@@ -440,23 +426,10 @@ function SmokeRun({ d, cat, reload }: { d: CompData; cat: Category; reload: () =
   const t = cur ? tallyFor(d.votes, cur, d.board.judges) : null;
   const name = (id: number | null) => entryName(d.board, id);
 
-  const crown = async (champ: number) => {
-    await must(sb().from("kj_smoke").update({ champion: champ }).eq("category", cat.slug));
-    await must(sb().from("kj_categories").update({ phase: "finished" }).eq("slug", cat.slug));
-    await log("smoke.champion", { category: cat.slug, champion: champ });
-  };
+  const crown = (champ: number) => smokeCrown(cat, champ);
   const win = (winner: number) => run(async () => {
     if (!cur) return;
-    const wasLive = cur.status === "live";
-    const s = smokeApply(state, winner, cat.smoke_target);
-    await must(sb().from("kj_battles").update({ winner_entry: winner, status: "done", decided_at: new Date().toISOString() }).eq("id", cur.id));
-    await must(sb().from("kj_smoke").update({ on_floor: s.onFloor, queue: s.queue, points: s.points }).eq("category", cat.slug));
-    await log("smoke.exchange", { category: cat.slug, battle: cur.id, winner });
-    if (s.champion) await crown(s.champion);
-    else {
-      const bt = smokeBattle(s)!;
-      await must(sb().from("kj_battles").insert({ category: cat.slug, kind: "smoke", round: 1, slot: cur.slot + 1, a_entry: bt.a, b_entry: bt.b, status: wasLive ? "live" : "pending" }));
-    }
+    await smokeWin(d, cat, cur, winner);
     await reload();
   });
   const undo = () => run(async () => {
@@ -516,6 +489,90 @@ function SmokeRun({ d, cat, reload }: { d: CompData; cat: Category; reload: () =
   );
 }
 
+
+
+// ---------------- Shared show operations (used by Run show and the category screens) ----------------
+
+/** Draw random prelim heats from every confirmed, non-invited entry. */
+export async function drawPrelims(d: CompData, cat: Category) {
+  const pool = confirmed(d, cat).filter((e) => !e.invited).map((e) => e.id);
+  if (pool.length < 2) throw new Error("Need at least 2 confirmed dancers for prelims.");
+  const rows = prelimPairs(pool).map((p, i) => ({ category: cat.slug, kind: "prelim", round: 1, slot: i + 1, a_entry: p.a, b_entry: p.b }));
+  await must(sb().from("kj_battles").insert(rows));
+  await must(sb().from("kj_categories").update({ phase: "prelims" }).eq("slug", cat.slug));
+  await log("prelims.start", { category: cat.slug, heats: rows.length });
+}
+
+/** Prelim ranking for a category plus where the cut falls. */
+export function prelimStanding(d: CompData, cat: Category) {
+  const heats = d.board.battles.filter((b) => b.category === cat.slug && b.kind === "prelim");
+  const ids = [...new Set(heats.flatMap((h) => [h.a_entry, h.b_entry]).filter((x): x is number => !!x))];
+  const ranked = rankPrelims(ids, d.scores.filter((s) => ids.includes(s.entry_id)));
+  const cut = cat.smoke ? cat.smoke_qualifiers : bracketSizeFor(ranked.length, cat.bracket_size);
+  const panel = Math.max(d.board.judges, 1);
+  const missing = ranked.filter((r) => r.judges < panel).length;
+  const cutTie = !!(ranked[cut - 1] && ranked[cut] && ranked[cut - 1].rank === ranked[cut].rank);
+  return { heats, ranked, cut, panel, missing, cutTie };
+}
+
+/** Lock prelim scores: seed the qualifiers, then build the bracket or start 7 to Smoke (invited first, then by rank). */
+export async function lockPrelims(d: CompData, cat: Category) {
+  const { ranked, cut } = prelimStanding(d, cat);
+  const top = ranked.slice(0, cut).map((r) => r.entry);
+  for (const [i, id] of top.entries()) await must(sb().from("kj_entries").update({ seed: i + 1 }).eq("id", id));
+  await must(sb().from("kj_battles").update({ status: "done" }).eq("category", cat.slug).eq("kind", "prelim"));
+  await log("prelims.lock", { category: cat.slug, qualified: top });
+  if (cat.smoke) await startSmoke(cat, [...confirmed(d, cat).filter((e) => e.invited).map((e) => e.id), ...top]);
+  else await buildBracket(cat, top);
+}
+
+export async function startSmoke(cat: Category, order: number[]) {
+  if (order.length < 2) throw new Error("Need at least 2 dancers.");
+  const s = smokeStart(order);
+  await must(sb().from("kj_battles").delete().eq("category", cat.slug).eq("kind", "smoke"));
+  await must(sb().from("kj_smoke").upsert({ category: cat.slug, lineup: order, on_floor: s.onFloor, queue: s.queue, points: s.points, champion: null, started_at: new Date().toISOString() }));
+  const bt = smokeBattle(s)!;
+  await must(sb().from("kj_battles").insert({ category: cat.slug, kind: "smoke", round: 1, slot: 1, a_entry: bt.a, b_entry: bt.b }));
+  await must(sb().from("kj_categories").update({ phase: "smoke" }).eq("slug", cat.slug));
+  await log("smoke.start", { category: cat.slug, order });
+}
+
+export async function smokeCrown(cat: Category, champ: number) {
+  await must(sb().from("kj_smoke").update({ champion: champ }).eq("category", cat.slug));
+  await must(sb().from("kj_categories").update({ phase: "finished" }).eq("slug", cat.slug));
+  await log("smoke.champion", { category: cat.slug, champion: champ });
+}
+
+/** Record a 7 to Smoke exchange; the next exchange is created (and kept on stage if this one was). */
+export async function smokeWin(d: CompData, cat: Category, cur: Battle, winner: number) {
+  const row = d.board.smoke.get(cat.slug);
+  if (!row) throw new Error("No 7 to Smoke board.");
+  const wasLive = cur.status === "live";
+  const s = smokeApply({ onFloor: row.on_floor, queue: row.queue, points: row.points, champion: row.champion }, winner, cat.smoke_target);
+  await must(sb().from("kj_battles").update({ winner_entry: winner, status: "done", decided_at: new Date().toISOString() }).eq("id", cur.id));
+  await must(sb().from("kj_smoke").update({ on_floor: s.onFloor, queue: s.queue, points: s.points }).eq("category", cat.slug));
+  await log("smoke.exchange", { category: cat.slug, battle: cur.id, winner });
+  if (s.champion) await smokeCrown(cat, s.champion);
+  else {
+    const bt = smokeBattle(s)!;
+    await must(sb().from("kj_battles").insert({ category: cat.slug, kind: "smoke", round: 1, slot: cur.slot + 1, a_entry: bt.a, b_entry: bt.b, status: wasLive ? "live" : "pending" }));
+  }
+  return s.champion;
+}
+
+/** Any battle result: bracket advances, smoke moves the line. */
+export async function decide(d: CompData, b: Battle, winner: number, walkover = false) {
+  const cat = d.board.cats.find((c) => c.slug === b.category)!;
+  if (b.kind === "smoke") return smokeWin(d, cat, b, winner);
+  await decideBracket(d, cat, b, winner, walkover);
+}
+
+export const extraRound = (b: Battle) => must(sb().from("kj_battles").update({ vote_round: b.vote_round + 1 }).eq("id", b.id));
+
+/** Battles ready to call, in running order (both dancers known, or a solo prelim heat). */
+export function readyQueue(d: CompData, only?: string): Battle[] {
+  return runOrder(d.board).filter((b) => b.status === "pending" && (!only || b.category === only) && !!b.a_entry && (!!b.b_entry || b.kind === "prelim"));
+}
 
 // ---------------- Roster (synced live) ----------------
 
