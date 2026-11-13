@@ -3,22 +3,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errMsg, must, sb, type Category, type Entry, type Payment, type Profile, type Role } from "./data";
 import { Comp, log } from "./Comp";
+import { Show } from "./Show";
 import type { Site } from "./MeApp";
 import { Btn, Card, Field, Notice, Pill, Stat, inputCls, useAction } from "./ui";
 
-type Tab = "run" | "checkin" | "payments" | "dancers" | "people" | "log";
+type Tab = "show" | "run" | "checkin" | "payments" | "dancers" | "people" | "log";
 
 export function Team({ isAdmin }: { isAdmin: boolean; site: Site }) {
-  const [tab, setTab] = useState<Tab>("run");
-  const tabs: [Tab, string][] = [["run", "Competition"], ["checkin", "Check-in"], ["payments", "Payments"], ["dancers", "Dancers"], ...(isAdmin ? [["people", "Roles"] as [Tab, string]] : []), ["log", "Log"]];
+  const [tab, setTab] = useState<Tab>("show");
+  const [focus, setFocus] = useState<string | null>(null);
+  const tabs: [Tab, string][] = [["show", "▶ Run show"], ["run", "Categories"], ["checkin", "Check-in"], ["payments", "Payments"], ["dancers", "Dancers"], ...(isAdmin ? [["people", "Roles"] as [Tab, string]] : []), ["log", "Log"]];
   return (
     <div className="space-y-5">
-      <nav className="flex flex-wrap gap-1 rounded-full bg-white p-1" aria-label="Team tools">
+      <nav className="-mx-4 flex gap-1 overflow-x-auto px-4 pb-1 [scrollbar-width:none]" aria-label="Team tools">
         {tabs.map(([k, label]) => (
-          <button key={k} onClick={() => setTab(k)} className={`rounded-full px-4 py-2 text-sm font-bold ${tab === k ? "bg-ink text-paper" : "hover:bg-ink/10"}`}>{label}</button>
+          <button key={k} onClick={() => setTab(k)} className={`shrink-0 rounded-full px-4 py-2.5 text-sm font-bold ${tab === k ? "bg-ink text-paper" : "bg-white hover:bg-ink/10"}`}>{label}</button>
         ))}
       </nav>
-      {tab === "run" && <Comp isAdmin={isAdmin} />}
+      {tab === "show" && <Show openCategory={(slug) => { setFocus(slug); setTab("run"); }} />}
+      {tab === "run" && <Comp key={focus ?? "all"} isAdmin={isAdmin} initial={focus} />}
       {tab === "checkin" && <CheckIn />}
       {tab === "payments" && <Payments />}
       {tab === "dancers" && <Dancers />}

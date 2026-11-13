@@ -1,19 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { tx, type Lang } from "@/lib/i18n";
-import { ineligible, roundLabel } from "@/lib/tournament";
+import { ageOn, ineligible, roundLabel } from "@/lib/tournament";
 import { errMsg, loadBoard, must, sb, useLive, BOARD_TABLES, entryName, type Category, type Entry, type Payment, type Profile, type ScoreRow } from "./data";
 import { tr, type Key } from "./i18n";
 import type { Site } from "./MeApp";
-import { Btn, Card, Field, Notice, Pill, Qr, inputCls, useAction } from "./ui";
+import { Btn, Card, Notice, Pill, Qr, useAction } from "./ui";
 
 type Mine = { cats: Category[]; entries: Entry[]; payment: Payment | null; names: Map<string, { code: string; stage_name: string }>; scores: ScoreRow[] };
+type Step = "profile" | "categories" | "payment" | "home";
+
+const EVENT_DAY = "2027-07-26";
+const big = "w-full rounded-2xl border-2 border-ink/15 bg-white px-4 py-3.5 text-base text-ink placeholder:text-ink/35 focus:border-ink focus:outline-none";
 
 export function Dancer({ profile, reloadProfile, site, lang, onSpectator }: { profile: Profile; reloadProfile: () => Promise<void>; site: Site; lang: Lang; onSpectator: () => void }) {
   const t = tr(lang);
   const [mine, setMine] = useState<Mine | null>(null);
   const [err, setErr] = useState("");
+  const [step, setStep] = useState<Step | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -34,124 +39,176 @@ export function Dancer({ profile, reloadProfile, site, lang, onSpectator }: { pr
   useEffect(() => { const f = setTimeout(load, 0); return () => clearTimeout(f); }, [load]);
 
   if (err) return <Notice kind="err">{err}</Notice>;
-  if (!mine) return <p>{t("loading")}</p>;
+  if (!mine) return <p className="py-20 text-center">{t("loading")}</p>;
 
   const myEntries = mine.entries.filter((e) => e.status === "active" && (e.dancer_id === profile.id || e.partner_status === "accepted"));
   const invites = mine.entries.filter((e) => e.partner_id === profile.id && e.partner_status === "pending");
-  const profileDone = !!(profile.stage_name && profile.birth_date && profile.gender);
-  const paid = mine.payment?.status === "paid";
-  const steps: [Key, boolean][] = [["stepProfile", profileDone], ["stepCategories", myEntries.length > 0], ["stepPayment", paid], ["stepPass", !!profile.checked_in_at]];
+  const profileDone = !!(profile.stage_name && profile.name && profile.birth_date && profile.gender);
+  const pay = mine.payment?.status;
+  const auto: Step = !profileDone ? "profile" : !myEntries.length ? "categories" : !pay || pay === "rejected" ? "payment" : "home";
+  const cur = step ?? auto;
+  const go = (s: Step) => { setStep(s); window.scrollTo(0, 0); };
+
+  const steps: [Step, Key, boolean][] = [["profile", "stepProfile", profileDone], ["categories", "stepCategories", myEntries.length > 0], ["payment", "stepPayment", pay === "paid" || pay === "pending"], ["home", "stepPass", pay === "paid"]];
 
   return (
-    <div className="space-y-6">
-      <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {steps.map(([k, done], i) => (
-          <li key={k} className={`rounded-xl px-4 py-3 ${done ? "bg-kj" : "bg-white"}`}>
-            <span className="label text-ink/60">{i + 1}</span>
-            <p className="display text-2xl">{t(k)} {done && "✓"}</p>
+    <div className="mx-auto max-w-xl pb-28">
+      <ol className="mb-5 grid grid-cols-4 gap-1.5">
+        {steps.map(([k, label, done], i) => (
+          <li key={k}>
+            <button onClick={() => go(k)} className="w-full text-left">
+              <span className={`block h-2 rounded-full ${cur === k ? "bg-ink" : done ? "bg-kj" : "bg-ink/10"}`} />
+              <span className={`mt-1 block text-xs font-bold ${cur === k ? "text-ink" : "text-ink/45"}`}>{i + 1}. {t(label)}{done ? " ✓" : ""}</span>
+            </button>
           </li>
         ))}
       </ol>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
-        <div className="min-w-0 space-y-6">
+      {invites.length > 0 && <div className="mb-4"><Invites invites={invites} mine={mine} reload={load} lang={lang} /></div>}
+
+      {cur === "profile" && <ProfileStep profile={profile} lang={lang} onDone={async () => { await reloadProfile(); go(myEntries.length ? (pay ? "home" : "payment") : "categories"); }} />}
+      {cur === "categories" && <CategoriesStep profile={profile} mine={mine} site={site} reload={load} lang={lang} onBack={() => go("profile")} onNext={() => go(pay && pay !== "rejected" ? "home" : "payment")} canNext={myEntries.length > 0} />}
+      {cur === "payment" && <PaymentStep profile={profile} mine={mine} site={site} reload={load} lang={lang} onBack={() => go("categories")} onDone={() => go("home")} hasEntries={myEntries.length > 0} />}
+      {cur === "home" && (
+        <div className="space-y-4">
+          <PassCard profile={profile} paid={pay === "paid"} lang={lang} />
           <MyBattles entryIds={myEntries.map((e) => e.id)} lang={lang} />
-          <ProfileForm profile={profile} reload={reloadProfile} lang={lang} />
-          {invites.length > 0 && <Invites invites={invites} mine={mine} reload={load} lang={lang} />}
-          <Categories profile={profile} mine={mine} site={site} reload={load} lang={lang} />
-          <PaymentCard profile={profile} mine={mine} site={site} reload={load} lang={lang} hasEntries={myEntries.length > 0} />
-          <Scores mine={mine} lang={lang} />
-        </div>
-        <aside className="space-y-4 lg:sticky lg:top-20 lg:self-start">
-          <Card dark title={t("pass")}>
-            <p className="label text-paper/60">{t("dancerId")}</p>
-            <p className="display text-6xl text-kj">{profile.code}</p>
-            <p className="mt-1 text-lg font-bold">{profile.stage_name || "—"}</p>
-            {profile.crew && <p className="text-paper/60">{profile.crew}{profile.city ? ` · ${profile.city}` : ""}</p>}
-            <div className="mt-5">
-              {paid ? (
-                <>
-                  <Qr value={profile.pass_token} label={`QR pass ${profile.code}`} />
-                  <p className="mt-3 text-sm text-paper/70">{t("passHint")}</p>
-                </>
-              ) : (
-                <p className="rounded-md bg-ink-2 p-4 text-sm text-paper/70">{t("passLocked")}</p>
-              )}
-              {profile.checked_in_at && <p className="mt-3"><Pill tone="ok">✓ {t("checkedIn")}</Pill></p>}
-            </div>
+          <Card title={t("myEntries")} aside={<button onClick={() => go("categories")} className="font-bold underline">{t("edit")}</button>}>
+            <ul className="space-y-1">{myEntries.map((e) => <li key={e.id} className="font-semibold">✓ {mine.cats.find((c) => c.slug === e.category)?.name}</li>)}</ul>
           </Card>
-          <button onClick={onSpectator} className="text-sm text-ink/50 underline hover:text-ink">{t("switchToSpectator")}</button>
-        </aside>
-      </div>
+          <Scores mine={mine} lang={lang} />
+          <div className="flex flex-wrap gap-4 text-sm">
+            <button onClick={() => go("profile")} className="underline">{t("profile")}</button>
+            <button onClick={() => go("payment")} className="underline">{t("payment")}</button>
+            <button onClick={onSpectator} className="text-ink/50 underline">{t("switchToSpectator")}</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function ProfileForm({ profile, reload, lang }: { profile: Profile; reload: () => Promise<void>; lang: Lang }) {
-  const t = tr(lang);
-  const [f, setF] = useState(profile);
-  const { busy, run, note } = useAction();
-  const set = (k: keyof Profile) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
-  const save = (e: React.FormEvent) => {
-    e.preventDefault();
-    run(async () => {
-      const { name, stage_name, crew, city, country, birth_date, gender, phone, instagram, guardian_name } = f;
-      await must(sb().from("kj_profiles").update({
-        name: name.trim(), stage_name: stage_name.trim(), crew: crew.trim(), city: city.trim(), country: country.trim().toUpperCase().slice(0, 2),
-        birth_date: birth_date || null, gender: gender || null, phone: phone.trim(), instagram: instagram.trim().replace(/^@/, ""), guardian_name: guardian_name.trim(), lang,
-      }).eq("id", profile.id));
-      await reload();
-    }, t("saved"));
-  };
+/** Fixed bottom action bar: thumb-reachable on phones. */
+function BottomBar({ children }: { children: ReactNode }) {
   return (
-    <Card title={t("profile")} aside={<span className="text-sm text-ink/55">{t("profileHint")}</span>}>
-      <form onSubmit={save} className="grid gap-3 sm:grid-cols-2">
-        <Field label={t("stageName")}><input required maxLength={60} value={f.stage_name} onChange={set("stage_name")} className={inputCls} /></Field>
-        <Field label={t("fullName")}><input required maxLength={120} value={f.name} onChange={set("name")} className={inputCls} autoComplete="name" /></Field>
-        <Field label={t("crew")}><input maxLength={80} value={f.crew} onChange={set("crew")} className={inputCls} /></Field>
-        <Field label={t("city")}><input maxLength={80} value={f.city} onChange={set("city")} className={inputCls} /></Field>
-        <Field label={t("birthDate")}><input required type="date" value={f.birth_date ?? ""} onChange={set("birth_date")} className={inputCls} /></Field>
-        <Field label={t("gender")}>
-          <select required value={f.gender ?? ""} onChange={set("gender")} className={inputCls}>
-            <option value="" disabled>—</option>
-            <option value="f">{t("gF")}</option>
-            <option value="m">{t("gM")}</option>
-            <option value="x">{t("gX")}</option>
-          </select>
-        </Field>
-        <Field label={t("country")}><input maxLength={2} value={f.country} onChange={set("country")} className={inputCls} /></Field>
-        <Field label={t("phone")}><input maxLength={30} value={f.phone} onChange={set("phone")} className={inputCls} inputMode="tel" /></Field>
-        <Field label={t("instagram")}><input maxLength={60} value={f.instagram} onChange={set("instagram")} className={inputCls} placeholder="@" /></Field>
-        <Field label={t("guardian")}><input maxLength={120} value={f.guardian_name} onChange={set("guardian_name")} className={inputCls} /></Field>
-        <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
-          <Btn type="submit" disabled={busy}>{t("save")}</Btn>
-          <div className="flex-1">{note}</div>
-        </div>
-      </form>
-    </Card>
+    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-ink/10 bg-paper/95 px-4 pb-[calc(env(safe-area-inset-bottom)+.75rem)] pt-3 backdrop-blur">
+      <div className="mx-auto flex max-w-xl gap-2">{children}</div>
+    </div>
+  );
+}
+const primaryBtn = "h-14 flex-1 rounded-2xl bg-ink text-lg font-black text-paper disabled:bg-ink/25";
+const backBtn = "h-14 rounded-2xl border-2 border-ink px-5 font-bold";
+
+function StepHead({ title, lead }: { title: string; lead: string }) {
+  return (
+    <div className="mb-4">
+      <h1 className="display text-5xl">{title}</h1>
+      <p className="mt-1 text-ink/65">{lead}</p>
+    </div>
   );
 }
 
-function Categories({ profile, mine, site, reload, lang }: { profile: Profile; mine: Mine; site: Site; reload: () => Promise<void>; lang: Lang }) {
+function PassCard({ profile, paid, lang }: { profile: Profile; paid: boolean; lang: Lang }) {
+  const t = tr(lang);
+  return (
+    <section className="rounded-3xl bg-ink p-5 text-paper">
+      <p className="label text-paper/60">{paid ? t("doneTitle") : t("waitingTitle")}</p>
+      <p className="display mt-1 text-6xl text-kj">{profile.code}</p>
+      <p className="text-xl font-bold">{profile.stage_name}</p>
+      {profile.crew && <p className="text-paper/60">{profile.crew}{profile.city ? ` · ${profile.city}` : ""}</p>}
+      <div className="mt-4">
+        {paid ? (
+          <div className="flex flex-col items-center gap-3 rounded-2xl bg-white p-4 text-ink">
+            <Qr value={profile.pass_token} size={240} label={`QR pass ${profile.code}`} />
+            <p className="text-center text-sm">{t("passHint")}</p>
+            {profile.checked_in_at && <Pill tone="ok">✓ {t("checkedIn")}</Pill>}
+          </div>
+        ) : (
+          <p className="rounded-2xl bg-ink-2 p-4 text-paper/75">{t("waitingBody")}</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ProfileStep({ profile, lang, onDone }: { profile: Profile; lang: Lang; onDone: () => Promise<void> }) {
+  const t = tr(lang);
+  const [f, setF] = useState(profile);
+  const { busy, run, note } = useAction();
+  const set = (k: keyof Profile) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
+  const kid = !!f.birth_date && ageOn(f.birth_date, EVENT_DAY) < 12;
+  const ready = !!(f.stage_name.trim() && f.name.trim() && f.birth_date && f.gender && f.city.trim() && (!kid || f.guardian_name.trim()));
+  const save = () => run(async () => {
+    const { name, stage_name, crew, city, country, birth_date, gender, phone, instagram, guardian_name } = f;
+    await must(sb().from("kj_profiles").update({
+      name: name.trim(), stage_name: stage_name.trim(), crew: crew.trim(), city: city.trim(), country: (country || "ID").trim().toUpperCase().slice(0, 2),
+      birth_date: birth_date || null, gender: gender || null, phone: phone.trim(), instagram: instagram.trim().replace(/^@/, ""), guardian_name: guardian_name.trim(), lang,
+    }).eq("id", profile.id));
+    await onDone();
+  });
+  const field = (k: keyof Profile, label: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
+    <label className="block">
+      <span className="mb-1 block text-sm font-bold">{label}</span>
+      <input value={(f[k] as string) ?? ""} onChange={set(k)} className={big} {...props} />
+    </label>
+  );
+  return (
+    <div>
+      <StepHead title={t("profileTitle")} lead={t("profileLead")} />
+      <div className="space-y-4">
+        {field("stage_name", t("stageName"), { maxLength: 60, placeholder: "Bboy …", autoCapitalize: "words" })}
+        {field("name", t("fullName"), { maxLength: 120, autoComplete: "name" })}
+        {field("birth_date", t("birthDate"), { type: "date" })}
+        <div>
+          <span className="mb-1 block text-sm font-bold">{t("gender")}</span>
+          <div className="grid grid-cols-3 gap-2">
+            {([["f", t("gF")], ["m", t("gM")], ["x", t("gX")]] as const).map(([g, label]) => (
+              <button key={g} type="button" onClick={() => setF({ ...f, gender: g })} aria-pressed={f.gender === g}
+                className={`min-h-14 rounded-2xl px-2 text-sm font-bold ${f.gender === g ? "bg-ink text-paper" : "border-2 border-ink/15 bg-white"}`}>{label}</button>
+            ))}
+          </div>
+        </div>
+        {field("city", t("city"), { maxLength: 80, autoComplete: "address-level2" })}
+        {kid && (
+          <div>
+            {field("guardian_name", t("guardian"), { maxLength: 120 })}
+            <p className="mt-1 text-sm text-stamp">{t("guardianNeeded")}</p>
+          </div>
+        )}
+        <details className="rounded-2xl bg-white p-4">
+          <summary className="cursor-pointer font-bold">{t("moreOptional")}</summary>
+          <div className="mt-3 space-y-4">
+            {field("crew", t("crew"), { maxLength: 80 })}
+            {field("instagram", t("instagram"), { maxLength: 60, placeholder: "@", autoCapitalize: "none" })}
+            {field("phone", t("phone"), { maxLength: 30, inputMode: "tel", autoComplete: "tel" })}
+            {field("country", t("country"), { maxLength: 2, autoCapitalize: "characters" })}
+          </div>
+        </details>
+        {note}
+      </div>
+      <BottomBar><button disabled={!ready || busy} onClick={save} className={primaryBtn}>{busy ? t("sending") : t("saveNext")} →</button></BottomBar>
+    </div>
+  );
+}
+
+function CategoriesStep({ profile, mine, site, reload, lang, onBack, onNext, canNext }: { profile: Profile; mine: Mine; site: Site; reload: () => Promise<void>; lang: Lang; onBack: () => void; onNext: () => void; canNext: boolean }) {
   const t = tr(lang);
   const { busy, run, note } = useAction();
   const [codes, setCodes] = useState<Record<string, string>>({});
   const cms = new Map(site.categories.map((c) => [c.slug, c]));
+  const reason = { profile: "notEligibleProfile", gender: "notEligibleGender", age: "notEligibleAge", guardian: "notEligibleGuardian" } as const;
 
   const findPartner = async (raw: string) => {
     const digits = raw.replace(/\D/g, "");
     if (!digits) throw new Error(t("partnerNotFound"));
-    const code = `KJ-${digits.padStart(4, "0")}`;
-    const rows = (await must(sb().from("kj_people").select("id").eq("code", code).eq("role", "participant"))) as { id: string }[];
+    const rows = (await must(sb().from("kj_people").select("id").eq("code", `KJ-${digits.padStart(4, "0")}`).eq("role", "participant"))) as { id: string }[];
     if (!rows[0]) throw new Error(t("partnerNotFound"));
     return rows[0].id;
   };
-  const enter = (c: Category) => run(async () => {
-    await must(sb().from("kj_entries").insert({ category: c.slug, dancer_id: profile.id }));
-    await reload();
-  });
-  const leave = (e: Entry) => run(async () => {
-    await must(sb().from("kj_entries").delete().eq("id", e.id));
+  const toggle = (c: Category, entry: Entry | undefined) => run(async () => {
+    if (entry) await must(sb().from("kj_entries").delete().eq("id", entry.id));
+    else await must(sb().from("kj_entries").insert({ category: c.slug, dancer_id: profile.id }));
+    try { navigator.vibrate?.(15); } catch {}
     await reload();
   });
   const invite = (e: Entry) => run(async () => {
@@ -159,66 +216,44 @@ function Categories({ profile, mine, site, reload, lang }: { profile: Profile; m
     await must(sb().from("kj_entries").update({ partner_id: partner }).eq("id", e.id));
     await reload();
   });
-  const rename = (e: Entry, team_name: string) => run(async () => {
-    await must(sb().from("kj_entries").update({ team_name: team_name.trim().slice(0, 60) }).eq("id", e.id));
-    await reload();
-  });
-
-  const reason = { profile: "notEligibleProfile", gender: "notEligibleGender", age: "notEligibleAge", guardian: "notEligibleGuardian" } as const;
 
   return (
-    <Card title={t("categories")} aside={<span className="text-sm text-ink/55">{t("categoriesHint")}</span>}>
+    <div>
+      <StepHead title={t("catTitle")} lead={t("catLead")} />
       {note && <div className="mb-3">{note}</div>}
-      <ul className="divide-y divide-ink/10">
+      <ul className="space-y-3">
         {mine.cats.map((c) => {
           const info = cms.get(c.slug);
           const entry = mine.entries.find((e) => e.category === c.slug && e.status === "active" && (e.dancer_id === profile.id || (e.partner_id === profile.id && e.partner_status === "accepted")));
-          const why = ineligible(c.rule, profile, c.age_ref_date);
           const captain = entry?.dancer_id === profile.id;
+          const why = ineligible(c.rule, profile, c.age_ref_date);
+          const open = c.registration_open && c.phase === "setup";
+          const canToggle = open && (!entry || captain) && (!!entry || !why);
           const mate = entry && (captain ? entry.partner_id : entry.dancer_id);
           const mateName = mate ? mine.names.get(mate) : null;
           return (
-            <li key={c.slug} className="py-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="display text-2xl">{info?.name ?? c.name}</p>
-                  <p className="text-sm text-ink/60">
-                    {info ? `${t("schedule")}: Day ${info.day} · ${tx(info.unit, lang)} · ${tx(info.prize, lang)}` : ""}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {entry ? (
-                    <>
-                      <Pill tone="ok">✓ {t("entered")}</Pill>
-                      {captain && c.registration_open && c.phase === "setup" && <Btn kind="ghost" disabled={busy} onClick={() => leave(entry)}>{t("leave")}</Btn>}
-                    </>
-                  ) : !c.registration_open || c.phase !== "setup" ? (
-                    <Pill>{t("closed")}</Pill>
-                  ) : why ? (
-                    <Pill tone="warn">{t(reason[why])}</Pill>
-                  ) : (
-                    <Btn disabled={busy} onClick={() => enter(c)}>{t("enter")}</Btn>
-                  )}
-                </div>
-              </div>
+            <li key={c.slug} className={`overflow-hidden rounded-3xl ${entry ? "bg-ink text-paper" : "bg-white"} ${!entry && !canToggle ? "opacity-55" : ""}`}>
+              <button disabled={!canToggle || busy} onClick={() => toggle(c, entry)} className="flex w-full items-center gap-4 p-4 text-left">
+                <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full border-2 text-xl font-black ${entry ? "border-kj bg-kj text-ink" : "border-ink/25"}`}>{entry ? "✓" : ""}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="display block text-2xl leading-tight">{info?.name ?? c.name}</span>
+                  <span className={`block text-sm ${entry ? "text-paper/70" : "text-ink/60"}`}>
+                    {info ? `Day ${info.day} · ${tx(info.unit, lang)} · ${tx(info.prize, lang)}` : ""}
+                  </span>
+                  <span className={`mt-1 block text-xs font-bold ${entry ? "text-kj" : "text-ink/70"}`}>
+                    {!open ? t("closed") : entry ? (captain ? t("tapToLeave") : t("entered")) : why ? t(reason[why]) : t("tapToEnter")}
+                  </span>
+                </span>
+              </button>
               {entry && c.team && (
-                <div className="mt-3 rounded-lg bg-paper p-3">
-                  {mate ? (
-                    <p className="text-sm">
-                      <b>{mateName?.stage_name ?? "—"}</b> ({mateName?.code}) · {entry.partner_status === "accepted" ? <Pill tone="ok">{t("partnerAccepted")}</Pill> : <Pill tone="warn">{t("partnerPending")}</Pill>}
-                    </p>
-                  ) : null}
+                <div className="border-t border-paper/15 p-4">
+                  {mate && <p className="mb-2 text-sm"><b>{mateName?.stage_name ?? "—"}</b> ({mateName?.code}) · {entry.partner_status === "accepted" ? t("partnerAccepted") : t("partnerPending")}</p>}
                   {captain && entry.partner_status !== "accepted" && (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <input value={codes[c.slug] ?? ""} onChange={(e) => setCodes({ ...codes, [c.slug]: e.target.value })} placeholder={t("partnerCode")} className={`${inputCls} max-w-xs`} />
-                      <Btn disabled={busy} onClick={() => invite(entry)}>{t("invite")}</Btn>
+                    <div className="flex gap-2">
+                      <input value={codes[c.slug] ?? ""} onChange={(e) => setCodes({ ...codes, [c.slug]: e.target.value })} placeholder={t("partnerCode")} inputMode="numeric"
+                        className="min-w-0 flex-1 rounded-2xl bg-white px-4 py-3 text-base text-ink" />
+                      <button disabled={busy} onClick={() => invite(entry)} className="rounded-2xl bg-kj px-5 font-black text-ink">{t("invite")}</button>
                     </div>
-                  )}
-                  {captain && (
-                    <form className="mt-2 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); rename(entry, new FormData(e.currentTarget).get("team") as string); }}>
-                      <input name="team" defaultValue={entry.team_name} maxLength={60} placeholder={t("teamName")} className={`${inputCls} max-w-xs`} />
-                      <Btn kind="ghost" type="submit" disabled={busy}>{t("save")}</Btn>
-                    </form>
                   )}
                 </div>
               )}
@@ -226,7 +261,82 @@ function Categories({ profile, mine, site, reload, lang }: { profile: Profile; m
           );
         })}
       </ul>
-    </Card>
+      <BottomBar>
+        <button onClick={onBack} className={backBtn}>‹</button>
+        <button disabled={!canNext} onClick={onNext} className={primaryBtn}>{t("next")} →</button>
+      </BottomBar>
+    </div>
+  );
+}
+
+const METHODS = ["QRIS", "E-wallet", "Virtual account", "Bank transfer", "PayPal"];
+
+function PaymentStep({ profile, mine, site, reload, lang, onBack, onDone, hasEntries }: { profile: Profile; mine: Mine; site: Site; reload: () => Promise<void>; lang: Lang; onBack: () => void; onDone: () => void; hasEntries: boolean }) {
+  const t = tr(lang);
+  const p = mine.payment;
+  const { busy, run, note } = useAction();
+  const [method, setMethod] = useState(p?.method || METHODS[0]);
+  const [reference, setReference] = useState(p?.reference ?? "");
+  const [file, setFile] = useState<File | null>(null);
+  const done = p?.status === "paid" || p?.status === "pending";
+
+  const submit = () => run(async () => {
+    let proof_path = p?.proof_path ?? null;
+    if (file) {
+      const path = `${profile.id}/${Date.now()}-${file.name.replace(/[^\w.-]+/g, "_").slice(-60)}`;
+      const { error } = await sb().storage.from("kj-proofs").upload(path, file, { upsert: false, contentType: file.type });
+      if (error) throw new Error(error.message);
+      proof_path = path;
+    }
+    await must(sb().from("kj_payments").upsert({ dancer_id: profile.id, method, reference: reference.trim(), proof_path, amount: method === "PayPal" ? site.feeUsd : site.feeIdr }));
+    await reload();
+    onDone();
+  });
+
+  return (
+    <div>
+      <StepHead title={t("payTitle")} lead={t("payLead")} />
+      <section className="rounded-3xl bg-ink p-5 text-paper">
+        <p className="display text-5xl text-kj">{site.feeIdr}</p>
+        <p className="text-paper/60">{site.feeUsd} · PayPal</p>
+        <p className="mt-3 whitespace-pre-line text-paper/85">{tx(site.paymentInfo, lang)}</p>
+      </section>
+
+      {p?.status === "paid" && <p className="mt-4 rounded-2xl bg-kj p-4 font-bold">✓ {t("paymentPaid")}</p>}
+      {p?.status === "pending" && <p className="mt-4 rounded-2xl bg-gold p-4 font-bold">{t("paymentPending")}</p>}
+      {p?.status === "rejected" && <p className="mt-4 rounded-2xl bg-stamp p-4 font-bold text-white">{t("paymentRejected")}{p.note ? ` — ${p.note}` : ""}</p>}
+      {!hasEntries && <p className="mt-4 text-ink/60">{t("paymentNeedsEntry")}</p>}
+
+      {p?.status !== "paid" && hasEntries && (
+        <div className="mt-5 space-y-4">
+          <div>
+            <span className="mb-1 block text-sm font-bold">{t("method")}</span>
+            <div className="grid grid-cols-2 gap-2">
+              {METHODS.map((m) => (
+                <button key={m} onClick={() => setMethod(m)} aria-pressed={method === m}
+                  className={`min-h-12 rounded-2xl px-3 text-sm font-bold ${method === m ? "bg-ink text-paper" : "border-2 border-ink/15 bg-white"}`}>{m}</button>
+              ))}
+            </div>
+          </div>
+          <label className="block">
+            <span className="mb-1 block text-sm font-bold">{t("reference")}</span>
+            <input value={reference} maxLength={120} onChange={(e) => setReference(e.target.value)} className={big} />
+          </label>
+          <label className={`flex min-h-16 cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-4 text-center font-bold ${file ? "border-ink bg-kj" : "border-ink/30 bg-white"}`}>
+            <input type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="sr-only" />
+            {file ? `✓ ${t("fileChosen")}: ${file.name.slice(0, 28)}` : `📎 ${t("uploadProof")}`}
+          </label>
+          {note}
+        </div>
+      )}
+
+      <BottomBar>
+        <button onClick={onBack} className={backBtn}>‹</button>
+        {done && !file && reference === (p?.reference ?? "")
+          ? <button onClick={onDone} className={primaryBtn}>{t("next")} →</button>
+          : <button disabled={busy || !hasEntries || !reference.trim()} onClick={submit} className={primaryBtn}>{busy ? t("sending") : t("submitPayment")} →</button>}
+      </BottomBar>
+    </div>
   );
 }
 
@@ -253,60 +363,6 @@ function Invites({ invites, mine, reload, lang }: { invites: Entry[]; mine: Mine
           </div>
         );
       })}
-    </Card>
-  );
-}
-
-const METHODS = ["QRIS", "E-wallet", "Virtual account", "Bank transfer", "PayPal"];
-
-function PaymentCard({ profile, mine, site, reload, lang, hasEntries }: { profile: Profile; mine: Mine; site: Site; reload: () => Promise<void>; lang: Lang; hasEntries: boolean }) {
-  const t = tr(lang);
-  const p = mine.payment;
-  const { busy, run, note } = useAction();
-  const [method, setMethod] = useState(p?.method || METHODS[0]);
-  const [reference, setReference] = useState(p?.reference ?? "");
-  const [file, setFile] = useState<File | null>(null);
-  const status = p?.status === "paid" ? <Pill tone="ok">✓ {t("paymentPaid")}</Pill> : p?.status === "pending" ? <Pill tone="warn">{t("paymentPending")}</Pill> : p?.status === "rejected" ? <Pill tone="live">{t("paymentRejected")}</Pill> : <Pill>{t("paymentNone")}</Pill>;
-
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    run(async () => {
-      let proof_path = p?.proof_path ?? null;
-      if (file) {
-        const path = `${profile.id}/${Date.now()}-${file.name.replace(/[^\w.-]+/g, "_").slice(-60)}`;
-        const { error } = await sb().storage.from("kj-proofs").upload(path, file, { upsert: false, contentType: file.type });
-        if (error) throw new Error(error.message);
-        proof_path = path;
-      }
-      const row = { dancer_id: profile.id, method, reference: reference.trim(), proof_path, amount: method === "PayPal" ? site.feeUsd : site.feeIdr };
-      await must(sb().from("kj_payments").upsert(row));
-      await reload();
-    });
-  };
-
-  return (
-    <Card title={t("payment")} aside={status}>
-      <p className="display text-4xl">{site.feeIdr} <span className="text-xl text-ink/50">/ {site.feeUsd}</span></p>
-      <p className="mt-2 whitespace-pre-line text-ink/75">{tx(site.paymentInfo, lang)}</p>
-      {p?.status !== "paid" && (
-        hasEntries ? (
-          <form onSubmit={submit} className="mt-5 grid gap-3 sm:grid-cols-2">
-            <Field label={t("method")}>
-              <select value={method} onChange={(e) => setMethod(e.target.value)} className={inputCls}>{METHODS.map((m) => <option key={m}>{m}</option>)}</select>
-            </Field>
-            <Field label={t("reference")}><input required maxLength={120} value={reference} onChange={(e) => setReference(e.target.value)} className={inputCls} /></Field>
-            <Field label={t("proof")} className="sm:col-span-2">
-              <input type="file" accept="image/png,image/jpeg,image/webp,application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block text-sm" />
-            </Field>
-            <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
-              <Btn type="submit" disabled={busy}>{t("submitPayment")}</Btn>
-              <div className="flex-1">{note}</div>
-            </div>
-          </form>
-        ) : (
-          <p className="mt-4 text-sm text-ink/60">{t("paymentNeedsEntry")}</p>
-        )
-      )}
     </Card>
   );
 }
