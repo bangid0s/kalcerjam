@@ -3,6 +3,7 @@ import { getLang, pageMeta } from "@/lib/meta";
 import { getContent } from "@/lib/cms";
 import { PageHeader, SectionTag } from "@/components/bits";
 import { Bracket, SmokeBoard } from "@/components/live";
+import { LiveBoard } from "@/components/LiveBoard";
 
 export const generateMetadata = ({ params }: PageProps<"/[lang]/live">) => pageMeta(params, "/live", "live");
 
@@ -10,10 +11,18 @@ export default async function Live({ params }: PageProps<"/[lang]/live">) {
   const lang = await getLang(params);
   const l = (await getContent()).live;
   const x = (v: Parameters<typeof tx>[0]) => tx(v, lang);
-  return (
-    <>
-      <PageHeader kicker={x(l.kicker)} title={x(l.title)} />
 
+  const stream = l.streamUrl ? (
+    <iframe src={l.streamUrl} title="Live stream" className="mt-6 aspect-video w-full rounded-2xl border-0 bg-ink-2" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen />
+  ) : (
+    <div className="relative mt-6 grid aspect-video place-items-center overflow-hidden rounded-2xl bg-ink-2">
+      <p className="label relative text-paper/50">{x(l.streamPlaceholder)}</p>
+    </div>
+  );
+
+  // Shown until the team draws the first heat; then LiveBoard switches to real data.
+  const preview = (
+    <>
       <section className="mx-auto mt-16 max-w-7xl px-4 md:px-8">
         <div className="grid gap-px overflow-hidden rounded-2xl bg-ink text-paper md:grid-cols-[1.6fr_1fr]">
           <div className="bg-ink p-6">
@@ -33,13 +42,7 @@ export default async function Live({ params }: PageProps<"/[lang]/live">) {
             ))}
           </div>
         </div>
-        {l.streamUrl ? (
-          <iframe src={l.streamUrl} title="Live stream" className="mt-6 aspect-video w-full rounded-2xl border-0 bg-ink-2" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen />
-        ) : (
-          <div className="relative mt-6 grid aspect-video place-items-center overflow-hidden rounded-2xl bg-ink-2">
-            <p className="label relative text-paper/50">{x(l.streamPlaceholder)}</p>
-          </div>
-        )}
+        {stream}
       </section>
 
       <section className="mx-auto mt-24 max-w-7xl space-y-6 px-4 md:mt-32 md:px-8">
@@ -55,6 +58,16 @@ export default async function Live({ params }: PageProps<"/[lang]/live">) {
       </section>
 
       <p className="label mx-auto mt-10 max-w-7xl px-4 text-ink/50 md:px-8">{x(l.footnote)}</p>
+    </>
+  );
+
+  return (
+    <>
+      <PageHeader kicker={x(l.kicker)} title={x(l.title)} />
+      <LiveBoard
+        preview={preview}
+        copy={{ nowLabel: x(l.nowLabel), nextLabel: x(l.nextLabel), bracketsTag: x(l.bracketsTag), smokeTag: x(l.smokeTag), footnote: x(l.footnoteLive), stream }}
+      />
     </>
   );
 }

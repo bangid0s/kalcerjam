@@ -35,6 +35,7 @@ export const defaults = {
     email: "info@kalcerjam.com",
     instagram: "kalcerjam",
     rsvpOpen: false,
+    googleLogin: false, // turn on once the Google provider is set up in Supabase Auth
     siteTitle: "Kalcer Jam 2027 — Semarang",
     siteDescription: "Breaking & openstyle jam in Semarang, 26–27 July 2027. 7 to Smoke, 2vs2, Toprock, Footwork. Winners fly to the 6Kamenz Anniversary in Bangkok.",
     footerCrew: "Anak Kalcer: Fird, Joker, Senor. × 6Kamenz",
@@ -64,6 +65,7 @@ export const defaults = {
 
   ui: {
     register: t("Register", "Daftar"),
+    account: t("Sign in", "Masuk"),
     rsvp: t("RSVP free", "RSVP gratis"),
     menu: t("Menu"),
     close: t("Close", "Tutup"),
@@ -300,6 +302,7 @@ export const defaults = {
     smokeTag: t("7 to Smoke"),
     smokeTitles: ["Breaking", "Openstyle"],
     footnote: t("Sample data. Winners only — no scores or vote splits are ever shown here.", "Data contoh. Hanya pemenang — skor dan pembagian suara tidak ditampilkan."),
+    footnoteLive: t("Updates live. Winners only — no scores or vote splits are ever shown here.", "Diperbarui langsung. Hanya pemenang — skor dan pembagian suara tidak ditampilkan."),
   },
 
   about: {
@@ -470,10 +473,14 @@ export const defaults = {
     ],
     statusLabel: t("Status"),
     statusTitle: t("Opens 01.04.2027", "Dibuka 01.04.2027"),
-    statusBody: t("Sign-up and profiles go live soon, so you can get ready before registration opens.", "Akun dan profil segera aktif, jadi kamu bisa bersiap sebelum pendaftaran dibuka."),
-    statusButton: t("Create profile — soon", "Buat profil — segera"),
-    statusButtonUrl: "",
+    statusBody: t("Make your account and dancer profile now, so you're ready the day categories open.", "Buat akun dan profil dancer sekarang, supaya siap begitu kategori dibuka."),
+    statusButton: t("Create your profile", "Buat profilmu"),
+    statusButtonUrl: "/dashboard",
     statusNote: t("Rp200K. One fee covers every category", "Rp200K. Satu biaya untuk semua kategori"),
+    paymentInfo: t(
+      "Pay once by QRIS, e-wallet, virtual account or bank transfer (account details placeholder — set them in /admin → Register & RSVP). International dancers: USD 15 via PayPal (address placeholder). Then send the sender name or transaction ID and a screenshot below.",
+      "Bayar sekali via QRIS, e-wallet, virtual account atau transfer bank (detail rekening masih placeholder — atur di /admin → Register & RSVP). Dancer internasional: USD 15 via PayPal (alamat placeholder). Lalu kirim nama pengirim atau ID transaksi dan screenshot di bawah.",
+    ),
     spectatorsTag: t("Spectators", "Penonton"),
     rsvpTitle: t("Watch free.", "Nonton gratis."),
     rsvpBody: t("Entry costs nothing. RSVP so we know how many of you are coming, and get a QR pass by email.", "Masuk gratis. RSVP supaya kami tahu berapa yang datang, dan dapatkan QR pass lewat email."),

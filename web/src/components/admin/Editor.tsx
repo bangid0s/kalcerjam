@@ -30,7 +30,9 @@ const FIELD_HELP: Record<string, string> = {
   streamUrl: "YouTube embed URL, e.g. https://www.youtube.com/embed/VIDEO_ID",
   rsvpOpen: "When off, the RSVP form shows the 'closed' message instead of saving",
   showOnHome: "Show this tier's logos in the home page 'Backed by' strip",
-  statusButtonUrl: "Leave empty to keep the button disabled",
+  statusButtonUrl: "Leave empty to keep the button disabled. /dashboard is where dancers sign up",
+  googleLogin: "Show 'Continue with Google' on the sign-in page. Enable the Google provider in Supabase Auth first",
+  paymentInfo: "Shown to dancers on their dashboard next to the fee: bank / QRIS / PayPal details",
   url: "Optional link",
 };
 

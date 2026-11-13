@@ -8,7 +8,7 @@ import type { NavItem } from "@/lib/content";
 import type { T } from "@/lib/i18n";
 import { Logo } from "./bits";
 
-export function Nav({ lang, nav, navMore, ui }: { lang: Lang; nav: NavItem[]; navMore: NavItem[]; ui: { register: T; menu: T; close: T } }) {
+export function Nav({ lang, nav, navMore, ui }: { lang: Lang; nav: NavItem[]; navMore: NavItem[]; ui: { register: T; account: T; menu: T; close: T } }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const other: Lang = lang === "en" ? "id" : "en";
@@ -47,6 +47,7 @@ export function Nav({ lang, nav, navMore, ui }: { lang: Lang; nav: NavItem[]; na
             <Link href={swapLang(pathname, other)} hrefLang={other} className="label grid h-10 w-10 place-items-center text-paper/75 hover:text-kj" aria-label={`Switch to ${other === "id" ? "Bahasa Indonesia" : "English"}`}>
               {other.toUpperCase()}
             </Link>
+            <Link href="/dashboard" className="label hidden px-2 py-2 text-paper/75 hover:text-kj sm:inline">{tx(ui.account, lang)}</Link>
             <Link href={href(lang, "/register")} className="btn btn-kj hidden !px-4 !py-2.5 !text-base sm:inline-flex">{tx(ui.register, lang)}</Link>
             <button onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls="mobile-menu"
               className="grid h-10 w-10 place-items-center text-xl text-paper lg:hidden">
@@ -67,6 +68,7 @@ export function Nav({ lang, nav, navMore, ui }: { lang: Lang; nav: NavItem[]; na
             </Link>
           ))}
           <Link href={href(lang, "/register")} className="btn btn-kj mt-8 w-full">{tx(ui.register, lang)}</Link>
+          <Link href="/dashboard" className="btn btn-ghost mt-3 w-full border-paper text-paper">{tx(ui.account, lang)}</Link>
         </nav>
       </div>
     </>
