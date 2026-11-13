@@ -66,6 +66,11 @@ Everyone signs in at **`/dashboard`** with an email link (or Google, once enable
 | **team** | Competition runner (draw heats → ranking → bracket or 7 to Smoke, stage control, vote tallies, walkovers, undo), check-in desk (camera QR scan), payment verification, dancer roster (transfers, invited dancers, CSV), audit log. |
 
 Admins (`kj_admins`) get the team console plus a **Roles** tab and a "View as" switcher. Only admins can grant judge / mc / team.
+An admin can also judge: in the Judge view press **Make me a judge** (the team console stays available through "View as").
+
+**Rehearsal:** in Competition, an admin can **Load demo dancers** (names start with "Demo ·") to try the whole flow — draw heats, judge on phones, build the bracket, run 7 to Smoke — then **Clear demo data**. The team can also add walk-in dancers by hand in the Dancers tab; they count as paid.
+
+Participant lists sync live (Realtime on `kj_entries`, migration `20261115000000_kalcerjam_sync.sql`) to the team roster, the judges' Participants tab and the public Categories page.
 
 Rules live in the database (`supabase/migrations/20261114000000_kalcerjam_competition.sql`), so they hold even if someone calls the API directly: eligibility (Bgirl, Kids U-12 with guardian, Over 35, by 26 Jul 2027), scoring only while a category is in prelims, voting only on the live battle, scores/votes hidden from the public, dancers see their own scores only after "Dancers can see their scores" is on.
 The bracket / 7 to Smoke logic is in `src/lib/tournament.ts` with tests (`npm test`).

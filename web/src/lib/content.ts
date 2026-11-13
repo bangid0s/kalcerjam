@@ -186,6 +186,8 @@ export const defaults = {
     labelSlots: t("Slots", "Slot"),
     labelPrize: t("Prize", "Hadiah"),
     labelRules: t("Rules", "Aturan"),
+    labelRegistered: t("Registered", "Terdaftar"),
+    labelShowAll: t("Show all", "Lihat semua"),
     list: [
       {
         slug: "7-to-smoke-breaking", day: 1, name: "7 to Smoke — Breaking",
