@@ -4,10 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { href, swapLang, tx, type Lang } from "@/lib/i18n";
-import { nav, navMore, ui } from "@/lib/content";
+import type { NavItem } from "@/lib/content";
+import type { T } from "@/lib/i18n";
 import { Logo } from "./bits";
 
-export function Nav({ lang }: { lang: Lang }) {
+export function Nav({ lang, nav, navMore, ui }: { lang: Lang; nav: NavItem[]; navMore: NavItem[]; ui: { register: T; menu: T; close: T } }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const other: Lang = lang === "en" ? "id" : "en";

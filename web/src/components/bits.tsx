@@ -15,24 +15,6 @@ export function AnakKalcer({ className = "", ink = false }: { className?: string
   );
 }
 
-/** Endless scrolling strip of words. */
-export function Ticker({ items, reverse = false, className = "" }: { items: string[]; reverse?: boolean; className?: string }) {
-  const row = items.map((t, i) => (
-    <span key={i} className="flex items-center gap-8 px-4">
-      <span>{t}</span>
-      <span aria-hidden className="h-[.35em] w-[.35em] bg-current" />
-    </span>
-  ));
-  return (
-    <div className={`overflow-hidden whitespace-nowrap ${className}`} aria-label={items.join(", ")}>
-      <div aria-hidden className={`display flex w-max ${reverse ? "animate-marquee-rev" : "animate-marquee"}`}>
-        {row}
-        {row}
-      </div>
-    </div>
-  );
-}
-
 /** Photo slot: real image if src is given, else a plain placeholder block. */
 export function Photo({ src, alt, credit, className = "" }: { src?: string; alt: string; credit?: string; className?: string }) {
   return (
@@ -72,4 +54,15 @@ export function SectionTag({ children }: { children: ReactNode }) {
       <span className="h-px flex-1 bg-ink/15" />
     </p>
   );
+}
+
+export function SponsorLogo({ name, logo, url, className = "" }: { name: string; logo: string; url: string; className?: string }) {
+  const inner = logo ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={logo} alt={name || "Sponsor"} className="max-h-[70%] max-w-[80%] object-contain" />
+  ) : (
+    <span className="label text-ink/40">{name || "Logo"}</span>
+  );
+  const cls = `grid place-items-center bg-paper-2 ${className}`;
+  return url ? <a href={url} target="_blank" rel="noreferrer" className={cls}>{inner}</a> : <div className={cls}>{inner}</div>;
 }
