@@ -27,12 +27,23 @@ export async function loadComp(): Promise<CompData> {
 
 export const log = (action: string, detail: Record<string, unknown>) => sb().from("kj_log").insert({ action, detail }).then(() => undefined);
 
-/** Paid (or invited) entries that can actually battle. 2vs2 needs an accepted, paid partner too. */
-export function confirmed(d: CompData, cat: Category): Entry[] {
+/** Entry added by the team by name (walk-in paid at the door, or demo data): no account, counts as paid. */
+export const isManual = (e: Entry) => !e.dancer_id && !!e.guest_name;
+
+/** Why an entry can or can't battle yet. */
+export function entryState(d: CompData, cat: Category, e: Entry): "invited" | "walk-in" | "confirmed" | "unpaid" | "partner" {
+  if (e.invited) return "invited";
+  if (isManual(e)) return "walk-in";
   const paid = new Set(d.payments.filter((p) => p.status === "paid").map((p) => p.dancer_id));
-  return d.entries.filter((e) => e.category === cat.slug && e.status === "active" && (e.invited || (
-    !!e.dancer_id && paid.has(e.dancer_id) && (!cat.team || (!!e.partner_id && e.partner_status === "accepted" && paid.has(e.partner_id)))
-  )));
+  if (!e.dancer_id || !paid.has(e.dancer_id)) return "unpaid";
+  if (cat.team && (!e.partner_id || e.partner_status !== "accepted")) return "partner";
+  if (cat.team && !paid.has(e.partner_id!)) return "unpaid";
+  return "confirmed";
+}
+
+/** Paid, invited or walk-in entries that can actually battle. 2vs2 needs an accepted, paid partner too. */
+export function confirmed(d: CompData, cat: Category): Entry[] {
+  return d.entries.filter((e) => e.category === cat.slug && e.status === "active" && entryState(d, cat, e) !== "unpaid" && entryState(d, cat, e) !== "partner");
 }
 
 /** Put one battle on stage (anything else live goes back to the queue). */
@@ -41,7 +52,7 @@ export async function putOnStage(b: Battle | null) {
   if (b) await must(sb().from("kj_battles").update({ status: "live" }).eq("id", b.id));
 }
 
-export function Comp() {
+export function Comp({ isAdmin = false }: { isAdmin?: boolean }) {
   const { data, error, reload } = useLive(loadComp, ["kj_battles", "kj_smoke", "kj_categories", "kj_votes", "kj_scores", "kj_entries"], 8000);
   const [slug, setSlug] = useState<string | null>(null);
   if (error) return <Notice kind="err">{error}</Notice>;
@@ -67,6 +78,8 @@ export function Comp() {
         </Notice>
       )}
       <CategoryPanel key={cat.slug} d={data} cat={cat} reload={reload} />
+      <Roster d={data} cat={cat} />
+      {isAdmin && <DemoData d={data} reload={reload} />}
     </div>
   );
 }
@@ -503,3 +516,85 @@ function SmokeRun({ d, cat, reload }: { d: CompData; cat: Category; reload: () =
   );
 }
 
+
+// ---------------- Roster (synced live) ----------------
+
+const STATE_LABEL = { invited: ["Invited", "ink"], "walk-in": ["Walk-in", "ok"], confirmed: ["Paid", "ok"], unpaid: ["Unpaid", "warn"], partner: ["Partner pending", "warn"] } as const;
+
+function Roster({ d, cat }: { d: CompData; cat: Category }) {
+  const rows = d.entries.filter((e) => e.category === cat.slug).sort((a, b) => (a.seed ?? 999) - (b.seed ?? 999) || a.id - b.id);
+  return (
+    <Card title={`Participants · ${cat.name}`} aside={<span className="text-sm text-ink/60">{confirmed(d, cat).length} can battle · {rows.filter((e) => e.status === "active").length} entered · updates live</span>}>
+      {rows.length === 0 ? <p className="text-ink/60">No entries yet.</p> : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="text-ink/55"><tr><th className="py-1 pr-3">Seed</th><th className="pr-3">Dancer</th><th className="pr-3">ID</th><th className="pr-3">From</th><th>Status</th></tr></thead>
+            <tbody>
+              {rows.map((e) => {
+                const pub = d.board.entries.get(e.id);
+                const st = entryState(d, cat, e);
+                return (
+                  <tr key={e.id} className={`border-t border-ink/10 ${e.status !== "active" ? "opacity-40" : ""}`}>
+                    <td className="py-1.5 pr-3 font-bold">{e.seed ? `#${e.seed}` : "—"}</td>
+                    <td className="pr-3 font-semibold">{pub?.label ?? e.guest_name ?? `#${e.id}`}</td>
+                    <td className="pr-3">{pub?.code ?? "—"}</td>
+                    <td className="pr-3">{[pub?.crew, pub?.city].filter(Boolean).join(" · ")}</td>
+                    <td>{e.status !== "active" ? <Pill>{e.status}</Pill> : <Pill tone={STATE_LABEL[st][1]}>{STATE_LABEL[st][0]}</Pill>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ---------------- Demo data (admins) ----------------
+
+const DEMO = ["Kilat", "Ucup", "Jaka", "Bimo", "Tono", "Gendhis", "Ratu", "Sari", "Dewi", "Lala", "Arya", "Bayu", "Citra", "Dimas", "Eka", "Fajar"];
+
+/** Fill every category with made-up walk-in dancers so the team and judges can rehearse the whole flow. */
+function DemoData({ d, reload }: { d: CompData; reload: () => Promise<void> }) {
+  const { busy, run, note } = useAction();
+  const demo = d.entries.filter((e) => e.guest_name?.startsWith("Demo · "));
+  const load = () => run(async () => {
+    const rows = d.board.cats.flatMap((c) => {
+      const n = c.smoke ? 8 : c.team ? 8 : 12;
+      const list = Array.from({ length: n }, (_, i) => ({
+        category: c.slug, guest_name: `Demo · ${c.team ? `${DEMO[i]} & ${DEMO[(i + 8) % 16]}` : DEMO[i]}`,
+        invited: c.smoke && i < 4, dancer_id: null,
+      }));
+      return list;
+    });
+    await must(sb().from("kj_entries").insert(rows));
+    await log("demo.load", { entries: rows.length });
+    await reload();
+  }, "Demo dancers added. Pick a category above and press “Draw prelim heats”.");
+  const clear = () => {
+    if (!confirm("Remove all demo dancers and reset every category that used them (heats, scores, votes, brackets)?")) return;
+    run(async () => {
+      const cats = [...new Set(demo.map((e) => e.category))];
+      for (const c of cats) {
+        await must(sb().from("kj_battles").delete().eq("category", c));
+        await must(sb().from("kj_smoke").delete().eq("category", c));
+        await must(sb().from("kj_categories").update({ phase: "setup", results_published: false }).eq("slug", c));
+      }
+      await must(sb().from("kj_entries").delete().like("guest_name", "Demo · %"));
+      await must(sb().from("kj_entries").update({ seed: null }).in("category", cats));
+      await log("demo.clear", { categories: cats });
+      await reload();
+    }, "Demo data removed.");
+  };
+  return (
+    <Card title="Rehearsal" aside={<span className="text-sm text-ink/55">Admins only</span>}>
+      <p className="text-sm text-ink/70">Load made-up dancers into every category to rehearse: draw heats, judge on phones, build brackets and run 7 to Smoke. Their names start with “Demo ·”. Clear them before the real event.</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Btn disabled={busy || demo.length > 0} onClick={load}>Load demo dancers</Btn>
+        <Btn kind="danger" disabled={busy || demo.length === 0} onClick={clear}>Clear demo data ({demo.length})</Btn>
+      </div>
+      {note && <div className="mt-3">{note}</div>}
+    </Card>
+  );
+}

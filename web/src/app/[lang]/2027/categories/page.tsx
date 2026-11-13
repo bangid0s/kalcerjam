@@ -4,6 +4,7 @@ import { getLang, pageMeta } from "@/lib/meta";
 import { getContent } from "@/lib/cms";
 import type { Category } from "@/lib/content";
 import { PageHeader } from "@/components/bits";
+import { CategoryRoster } from "@/components/CategoryRoster";
 
 export const generateMetadata = ({ params }: PageProps<"/[lang]/2027/categories">) => pageMeta(params, "/2027/categories", "categories");
 
@@ -44,6 +45,7 @@ export default async function Categories({ params }: PageProps<"/[lang]/2027/cat
                     </div>
                   ))}
                 </dl>
+                <CategoryRoster slug={cat.slug} label={x(p.labelRegistered)} more={x(p.labelShowAll)} />
                 <div className="flex gap-6 border-t border-ink/15 pt-4">
                   <Link href={href(lang, "/2027/rules")} className="label text-ink/75 hover:text-ink">{x(p.labelRules)}</Link>
                   <Link href={href(lang, "/register")} className="label border-b-2 border-ink text-ink hover:opacity-60">{x(c.ui.register)}</Link>

@@ -18,7 +18,7 @@ export function Team({ isAdmin }: { isAdmin: boolean; site: Site }) {
           <button key={k} onClick={() => setTab(k)} className={`rounded-full px-4 py-2 text-sm font-bold ${tab === k ? "bg-ink text-paper" : "hover:bg-ink/10"}`}>{label}</button>
         ))}
       </nav>
-      {tab === "run" && <Comp />}
+      {tab === "run" && <Comp isAdmin={isAdmin} />}
       {tab === "checkin" && <CheckIn />}
       {tab === "payments" && <Payments />}
       {tab === "dancers" && <Dancers />}
@@ -242,7 +242,7 @@ function Dancers() {
   const [q, setQ] = useState("");
   const [err, setErr] = useState("");
   const { busy, run, note } = useAction();
-  const [guest, setGuest] = useState({ category: "", name: "", code: "" });
+  const [guest, setGuest] = useState({ category: "", name: "", code: "", invited: false });
 
   const load = useCallback(async () => {
     try {
@@ -292,11 +292,11 @@ function Dancers() {
       const target = guest.code ? byCode(guest.code) : null;
       if (guest.code && !target) throw new Error("No dancer with that ID.");
       if (!target && !guest.name.trim()) throw new Error("Give a name or a dancer ID.");
-      await must(sb().from("kj_entries").insert({ category: guest.category, dancer_id: target?.id ?? null, guest_name: target ? null : guest.name.trim(), invited: true }));
-      await log("entry.invited", { category: guest.category, dancer: target?.code ?? guest.name });
+      await must(sb().from("kj_entries").insert({ category: guest.category, dancer_id: target?.id ?? null, guest_name: target ? null : guest.name.trim(), invited: guest.invited }));
+      await log(guest.invited ? "entry.invited" : "entry.manual", { category: guest.category, dancer: target?.code ?? guest.name });
       setGuest({ ...guest, name: "", code: "" });
       await load();
-    }, "Invited dancer added.");
+    }, guest.invited ? "Invited dancer added." : "Dancer added.");
   };
   const csv = () => {
     const head = ["code", "stage_name", "name", "crew", "city", "country", "birth_date", "gender", "email", "phone", "instagram", "paid", "checked_in", "categories"];
@@ -307,7 +307,7 @@ function Dancers() {
     a.download = `kalcerjam-dancers-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
   };
-  const guests = data.entries.filter((e) => e.invited);
+  const guests = data.entries.filter((e) => e.invited || (!e.dancer_id && e.guest_name && !e.guest_name.startsWith("Demo · ")));
 
   return (
     <div className="space-y-5">
@@ -315,10 +315,10 @@ function Dancers() {
         <Stat label="Dancers" value={data.profiles.length} />
         <Stat label="Paid" value={data.payments.filter((p) => p.status === "paid").length} />
         <Stat label="Entries" value={data.entries.filter((e) => e.status === "active").length} />
-        <Stat label="Invited" value={guests.length} />
+        <Stat label="Added by hand" value={guests.length} />
       </div>
       {note}
-      <Card title="Add an invited dancer" aside={<span className="text-sm text-ink/55">e.g. the 4 invited for 7 to Smoke. No fee needed.</span>}>
+      <Card title="Add a dancer by hand" aside={<span className="text-sm text-ink/55">Walk-ins who paid at the door, or invited dancers. Counted as paid.</span>}>
         <form onSubmit={addGuest} className="grid gap-3 sm:grid-cols-4">
           <Field label="Category">
             <select required value={guest.category} onChange={(e) => setGuest({ ...guest, category: e.target.value })} className={inputCls}>
@@ -328,11 +328,11 @@ function Dancers() {
           </Field>
           <Field label="Dancer ID (if they have an account)"><input value={guest.code} onChange={(e) => setGuest({ ...guest, code: e.target.value })} placeholder="KJ-0042" className={inputCls} /></Field>
           <Field label="…or name"><input value={guest.name} maxLength={120} onChange={(e) => setGuest({ ...guest, name: e.target.value })} className={inputCls} /></Field>
-          <div className="self-end"><Btn type="submit" disabled={busy}>Add</Btn></div>
+          <div className="flex flex-col gap-2 self-end"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={guest.invited} onChange={(e) => setGuest({ ...guest, invited: e.target.checked })} className="h-4 w-4 accent-ink" />Invited (skips prelims)</label><Btn type="submit" disabled={busy}>Add</Btn></div>
         </form>
         {guests.length > 0 && (
           <ul className="mt-4 flex flex-wrap gap-2 text-sm">
-            {guests.map((g) => <li key={g.id} className="rounded-full bg-paper px-3 py-1">{catName(g.category)}: <b>{g.guest_name ?? data.profiles.find((p) => p.id === g.dancer_id)?.stage_name}</b> {g.status !== "active" && `(${g.status})`}</li>)}
+            {guests.map((g) => <li key={g.id} className="rounded-full bg-paper px-3 py-1">{catName(g.category)}: <b>{g.guest_name ?? data.profiles.find((p) => p.id === g.dancer_id)?.stage_name}</b> {g.invited ? "· invited" : "· walk-in"} {g.status !== "active" && `(${g.status})`}</li>)}
           </ul>
         )}
       </Card>

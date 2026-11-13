@@ -90,7 +90,7 @@ function Signed({ session, site, lang, setLang }: { session: Session; site: Site
   const current: View = view ?? (isAdmin && (profile.role === "spectator" || profile.role === "participant") ? "team" : profile.role);
   const views: View[] = isAdmin ? ["team", "judge", "mc", "participant", "spectator"] : [];
 
-  const setRole = async (role: "spectator" | "participant") => {
+  const setRole = async (role: Role) => {
     try {
       await must(sb().from("kj_profiles").update({ role }).eq("id", uid));
       setView(null);
@@ -129,7 +129,7 @@ function Signed({ session, site, lang, setLang }: { session: Session; site: Site
       <main className="mx-auto max-w-6xl px-4 pt-6">
         {current === "participant" && <Dancer profile={profile} reloadProfile={loadProfile} site={site} lang={lang} onSpectator={() => setRole("spectator")} />}
         {current === "spectator" && <Spectator profile={profile} site={site} lang={lang} onDancer={() => setRole("participant")} />}
-        {current === "judge" && <Judge uid={uid} preview={profile.role !== "judge"} />}
+        {current === "judge" && <Judge uid={uid} preview={profile.role !== "judge"} onBecomeJudge={isAdmin ? () => setRole("judge") : undefined} />}
         {current === "mc" && <Mc />}
         {current === "team" && <Team isAdmin={isAdmin} site={site} />}
       </main>

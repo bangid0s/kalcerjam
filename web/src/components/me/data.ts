@@ -95,7 +95,7 @@ export async function loadBoard(): Promise<Board> {
     judges: judges.count ?? 0,
   };
 }
-export const BOARD_TABLES = ["kj_battles", "kj_smoke", "kj_categories"];
+export const BOARD_TABLES = ["kj_battles", "kj_smoke", "kj_categories", "kj_entries"];
 
 export const entryName = (b: Board | null, id: number | null | undefined) => (id == null ? "TBA" : b?.entries.get(id)?.label ?? `#${id}`);
 
