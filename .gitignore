@@ -1,0 +1,6 @@
+# Product docs stay local
+*.docx
+
+# OS / editor
+.DS_Store
+Thumbs.db

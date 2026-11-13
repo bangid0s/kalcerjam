@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+/* Brand tokens: bone page, black cards, and the logo's lime. Red and gold are signals only (live dot, 7th win). */
+@theme {
+  --color-ink: #0a0a0a;
+  --color-ink-2: #1c1c1c;
+  --color-paper: #f2f2ec;
+  --color-paper-2: #e2e2da;
+  --color-kj: #b6f004; /* sampled from the 2026 logo */
+  --color-stamp: #ff3b1d;
+  --color-gold: #ffc21a;
+
+  --font-display: var(--nf-anton), "Impact", sans-serif;
+  --font-sans: var(--nf-archivo), system-ui, sans-serif;
+
+  --animate-marquee: marquee 36s linear infinite;
+  --animate-marquee-rev: marquee 36s linear infinite reverse;
+}
+
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+html { scroll-behavior: smooth; }
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  line-height: 1.55;
+  overflow-x: hidden;
+}
+
+::selection { background: var(--color-kj); color: var(--color-ink); }
+
+@layer components {
+  .display { font-family: var(--font-display); text-transform: uppercase; line-height: .9; letter-spacing: 0; }
+  .label { font-family: var(--font-sans); font-weight: 600; font-size: .8rem; line-height: 1.3; letter-spacing: .01em; text-transform: none; }
+  /* Spoken asides: the one place the voice leans */
+  .marker { font-family: var(--font-sans); font-weight: 800; font-style: italic; letter-spacing: -.01em; }
+
+  /* White card on the bone page */
+  .paper { background-color: #fff; color: var(--color-ink); border-radius: 1rem; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .6rem;
+    font-family: var(--font-display); text-transform: uppercase; font-size: 1.15rem; line-height: 1;
+    padding: 1rem 1.7rem .9rem;
+    border: 2px solid var(--color-ink);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background-color .2s ease, color .2s ease, border-color .2s ease;
+  }
+  .btn-kj { background: var(--color-kj); color: var(--color-ink); border-color: var(--color-kj); }
+  .btn-kj:hover { background: var(--color-paper); border-color: var(--color-paper); }
+  .btn-ghost:hover { background: var(--color-ink); color: var(--color-paper); }
+  .btn-ink { background: var(--color-ink); color: var(--color-paper); }
+  .btn-ink:hover { background: var(--color-kj); color: var(--color-ink); }
+
+  :focus-visible { outline: 3px solid var(--color-ink); outline-offset: 3px; }
+  .bg-ink :focus-visible { outline-color: var(--color-kj); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
