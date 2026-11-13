@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
-import { href, isLang, type Lang, type T } from "./i18n";
+import { href, isLang, type Lang } from "./i18n";
+import { getContent } from "./cms";
+import type { PageMeta } from "./content";
 
-/** Per-page title/description with EN/ID alternates (PRD §3 SEO). */
-export async function pageMeta(params: Promise<{ lang: string }>, path: string, title: T, description: T): Promise<Metadata> {
-  const { lang: raw } = await params;
-  const lang: Lang = isLang(raw) ? raw : "en";
+type MetaKey = { [K in keyof Awaited<ReturnType<typeof getContent>>]: Awaited<ReturnType<typeof getContent>>[K] extends { meta: PageMeta } ? K : never }[keyof Awaited<ReturnType<typeof getContent>>];
+
+/** Per-page title/description (editable in /admin) with EN/ID alternates. */
+export async function pageMeta(params: Promise<{ lang: string }>, path: string, key: MetaKey): Promise<Metadata> {
+  const lang = await getLang(params);
+  const { title, description } = (await getContent())[key].meta;
   return {
     title: title[lang],
     description: description[lang],

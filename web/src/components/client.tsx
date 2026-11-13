@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
+import { submitRsvp, type RsvpState } from "@/app/[lang]/actions";
 import { tx, type Lang, type T } from "@/lib/i18n";
 
 export function Countdown({ to, units }: { to: string; units: string[] }) {
@@ -61,25 +62,25 @@ export function FaqSearch({ lang, groups, placeholder, empty }: { lang: Lang; gr
   );
 }
 
-/** Spectator RSVP. Not wired to a backend yet, so it says so instead of pretending to save. */
-export function RsvpForm({ lang }: { lang: Lang }) {
-  const [sent, setSent] = useState(false);
-  const L = {
-    name: { en: "Name", id: "Nama" }, email: { en: "Email", id: "Email" }, city: { en: "City", id: "Kota" },
-    party: { en: "People", id: "Jumlah orang" }, news: { en: "Send me Kalcer Jam news", id: "Kirimi saya kabar Kalcer Jam" },
-    go: { en: "Get my free pass", id: "Ambil pass gratis" },
-    soon: { en: "RSVP opens with registration on 1 April 2027. Follow @kalcerjam so you don't miss it.", id: "RSVP dibuka bersama pendaftaran pada 1 April 2027. Follow @kalcerjam supaya tidak ketinggalan." },
-  };
+type RsvpCopy = { name: T; email: T; city: T; party: T; news: T; submit: T; closed: T; success: T; error: T };
+
+/** Spectator RSVP, saved to Supabase (kj_rsvp). While `open` is off it shows the "opens soon" note instead. */
+export function RsvpForm({ lang, open, copy }: { lang: Lang; open: boolean; copy: RsvpCopy }) {
+  const [state, action, pending] = useActionState(submitRsvp, { status: "idle" } as RsvpState);
+  const [triedClosed, setTriedClosed] = useState(false);
   const field = "w-full border-2 border-ink bg-transparent px-3 py-3 text-ink placeholder:text-ink/40 focus:bg-paper focus:outline-none";
+  if (state.status === "ok") return <p role="status" className="self-center bg-ink px-4 py-5 text-lg text-paper">{tx(copy.success, lang)}</p>;
   return (
-    <form onSubmit={(e) => { e.preventDefault(); setSent(true); }} className="grid gap-3 sm:grid-cols-2">
-      <label className="sm:col-span-2"><span className="label mb-1 block">{tx(L.name, lang)}</span><input required name="name" autoComplete="name" className={field} /></label>
-      <label><span className="label mb-1 block">{tx(L.email, lang)}</span><input required type="email" name="email" autoComplete="email" className={field} /></label>
-      <label><span className="label mb-1 block">{tx(L.city, lang)}</span><input required name="city" autoComplete="address-level2" className={field} /></label>
-      <label><span className="label mb-1 block">{tx(L.party, lang)}</span><input required type="number" min={1} max={10} defaultValue={1} name="party" className={field} /></label>
-      <label className="flex items-center gap-3 self-end pb-3"><input type="checkbox" name="news" className="h-5 w-5 accent-ink" /><span className="text-sm">{tx(L.news, lang)}</span></label>
-      <button className="btn btn-ink sm:col-span-2">{tx(L.go, lang)}</button>
-      {sent && <p role="status" className="bg-ink px-4 py-3 text-paper sm:col-span-2">{tx(L.soon, lang)}</p>}
+    <form action={open ? action : undefined} onSubmit={open ? undefined : (e) => { e.preventDefault(); setTriedClosed(true); }} className="grid gap-3 sm:grid-cols-2">
+      <input type="hidden" name="lang" value={lang} />
+      <label className="sm:col-span-2"><span className="label mb-1 block">{tx(copy.name, lang)}</span><input required name="name" maxLength={120} autoComplete="name" className={field} /></label>
+      <label><span className="label mb-1 block">{tx(copy.email, lang)}</span><input required type="email" name="email" autoComplete="email" className={field} /></label>
+      <label><span className="label mb-1 block">{tx(copy.city, lang)}</span><input required name="city" maxLength={120} autoComplete="address-level2" className={field} /></label>
+      <label><span className="label mb-1 block">{tx(copy.party, lang)}</span><input required type="number" min={1} max={10} defaultValue={1} name="party" className={field} /></label>
+      <label className="flex items-center gap-3 self-end pb-3"><input type="checkbox" name="news" className="h-5 w-5 accent-ink" /><span className="text-sm">{tx(copy.news, lang)}</span></label>
+      <button disabled={pending} className="btn btn-ink sm:col-span-2 disabled:opacity-50">{tx(copy.submit, lang)}</button>
+      {triedClosed && <p role="status" className="bg-ink px-4 py-3 text-paper sm:col-span-2">{tx(copy.closed, lang)}</p>}
+      {state.status === "error" && <p role="alert" className="bg-stamp px-4 py-3 text-paper sm:col-span-2">{tx(copy.error, lang)}</p>}
     </form>
   );
 }
