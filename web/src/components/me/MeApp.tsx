@@ -60,6 +60,7 @@ function Signed({ session, site, lang, setLang }: { session: Session; site: Site
   const uid = session.user.id;
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuper, setIsSuper] = useState(false);
   const [view, setView] = useState<View | null>(null);
   const [err, setErr] = useState("");
 
@@ -80,7 +81,7 @@ function Signed({ session, site, lang, setLang }: { session: Session; site: Site
   useEffect(() => {
     const first = setTimeout(loadProfile, 0);
     const email = (session.user.email ?? "").toLowerCase();
-    sb().from("kj_admins").select("email").eq("email", email).then(({ data }) => setIsAdmin(!!data?.length));
+    sb().from("kj_admins").select("email,super").eq("email", email).then(({ data }) => { setIsAdmin(!!data?.length); setIsSuper(!!data?.[0]?.super); });
     return () => clearTimeout(first);
   }, [loadProfile, session.user.email]);
 
@@ -131,7 +132,7 @@ function Signed({ session, site, lang, setLang }: { session: Session; site: Site
         {current === "spectator" && <Spectator profile={profile} site={site} lang={lang} onDancer={() => setRole("participant")} />}
         {current === "judge" && <Judge uid={uid} preview={profile.role !== "judge"} onBecomeJudge={isAdmin ? () => setRole("judge") : undefined} />}
         {current === "mc" && <Mc />}
-        {current === "team" && <Team isAdmin={isAdmin} site={site} />}
+        {current === "team" && <Team isAdmin={isAdmin} isSuper={isSuper} site={site} />}
       </main>
     </div>
   );
@@ -144,6 +145,8 @@ function Center({ children }: { children: React.ReactNode }) {
 function Login({ lang, setLang, google }: { lang: Lang; setLang: (l: Lang) => void; google: boolean }) {
   const t = tr(lang);
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [mode, setMode] = useState<"link" | "password">("link");
   const [state, setState] = useState<"idle" | "sending" | "sent">("idle");
   const [err, setErr] = useState("");
   const redirectTo = () => `${window.location.origin}/dashboard`;
@@ -154,6 +157,14 @@ function Login({ lang, setLang, google }: { lang: Lang; setLang: (l: Lang) => vo
     setState("sending");
     const { error } = await sb().auth.signInWithOtp({ email: email.trim().toLowerCase(), options: { emailRedirectTo: redirectTo() } });
     if (error) { setErr(error.message); setState("idle"); } else setState("sent");
+  };
+  const withPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErr("");
+    setState("sending");
+    const { error } = await sb().auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
+    setState("idle");
+    if (error) setErr(error.message === "Invalid login credentials" ? t("wrongPassword") : error.message);
   };
   const withGoogle = async () => {
     const { error } = await sb().auth.signInWithOAuth({ provider: "google", options: { redirectTo: redirectTo() } });
@@ -173,12 +184,25 @@ function Login({ lang, setLang, google }: { lang: Lang; setLang: (l: Lang) => vo
         {state === "sent" ? (
           <p role="status" className="mt-6 rounded-md bg-ink px-4 py-4 text-paper">{t("linkSent")}</p>
         ) : (
-          <form onSubmit={send} className="mt-6 space-y-3">
+          <form onSubmit={mode === "link" ? send : withPassword} className="mt-6 space-y-3">
+            <div className="grid grid-cols-2 gap-1 rounded-full bg-paper p-1" role="tablist">
+              {(["link", "password"] as const).map((m) => (
+                <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => { setMode(m); setErr(""); }}
+                  className={`rounded-full py-2 text-sm font-bold ${mode === m ? "bg-ink text-paper" : ""}`}>{m === "link" ? t("modeLink") : t("modePassword")}</button>
+              ))}
+            </div>
             <label className="block">
               <span className="mb-1 block text-sm font-semibold">{t("email")}</span>
               <input type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
             </label>
-            <button disabled={state === "sending"} className="btn btn-ink w-full disabled:opacity-50">{state === "sending" ? t("sending") : t("sendLink")}</button>
+            {mode === "password" && (
+              <label className="block">
+                <span className="mb-1 block text-sm font-semibold">{t("password")}</span>
+                <input type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputCls} />
+              </label>
+            )}
+            <button disabled={state === "sending"} className="btn btn-ink w-full disabled:opacity-50">{state === "sending" ? t("sending") : mode === "link" ? t("sendLink") : t("signInTitle")}</button>
+            {mode === "password" && <button type="button" onClick={() => setMode("link")} className="w-full text-center text-sm underline">{t("forgotPassword")}</button>}
             {google && (
               <>
                 <p className="text-center text-sm text-ink/50">{t("or")}</p>
