@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { contentKeys, defaults, type ContentKey } from "@/lib/content";
@@ -46,7 +47,7 @@ export function AdminApp() {
 
   useEffect(() => {
     if (!email) return;
-    sb().from("kj_admins").select("email").eq("email", email).then(({ data }) => setAdminCheck({ email, ok: !!data?.length }));
+    sb().from("kj_admins").select("email,super").eq("email", email).then(({ data }) => setAdminCheck({ email, ok: !!data?.[0]?.super }));
   }, [email]);
 
   if (session === undefined) return <Center>Loading…</Center>;
@@ -55,8 +56,9 @@ export function AdminApp() {
   if (!isAdmin) {
     return (
       <Center>
-        <p className="display text-4xl">No admin access</p>
-        <p className="mt-3 max-w-md text-ink/70"><b>{session.user.email}</b> is signed in but isn&apos;t on the admin list. Ask an existing admin to add this email to the <code>kj_admins</code> table in Supabase.</p>
+        <p className="display text-4xl">Super admins only</p>
+        <p className="mt-3 max-w-md text-ink/70"><b>{session.user.email}</b> is signed in, but only super admins can edit the website. Admins run the event from the dashboard.</p>
+        <Link href="/dashboard" className="btn btn-kj mt-6">Go to dashboard</Link>
         <button onClick={() => sb().auth.signOut()} className="btn btn-ink mt-6">Sign out</button>
       </Center>
     );

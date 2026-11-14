@@ -119,7 +119,7 @@ function Signed({ session, site, lang, setLang }: { session: Session; site: Site
             </label>
           )}
           <div className="ml-auto flex items-center gap-3 text-sm">
-            {isAdmin && <Link href="/admin" className="font-semibold text-kj hover:underline">Site editor</Link>}
+            {isSuper && <Link href="/admin" className="font-semibold text-kj hover:underline">Site editor</Link>}
             <button onClick={() => setLang(lang === "en" ? "id" : "en")} className="font-semibold text-paper/75 hover:text-paper">{lang === "en" ? "ID" : "EN"}</button>
             <span className="hidden max-w-[14rem] truncate text-paper/50 sm:inline">{session.user.email}</span>
             <button onClick={() => sb().auth.signOut()} className="font-semibold text-paper/75 hover:text-paper">{t("signOut")}</button>
