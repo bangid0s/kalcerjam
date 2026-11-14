@@ -180,7 +180,7 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
         <div><span className="mb-1 block text-sm font-semibold">Role</span><RolePicker value={f.role} onChange={(role) => setF({ ...f, role })} /></div>
         <label className="flex items-center gap-3 rounded-xl bg-white p-3">
           <input type="checkbox" checked={f.admin} onChange={(e) => setF({ ...f, admin: e.target.checked })} className="h-5 w-5 accent-ink" />
-          <span><b>Admin</b><span className="block text-sm text-ink/60">Can edit the website, run the competition and assign roles.</span></span>
+          <span><b>Admin</b><span className="block text-sm text-ink/60">Runs the event and competition, check-in, payments and roles. Can&apos;t edit the website.</span></span>
         </label>
         {note}
         <Btn type="submit" disabled={busy || f.password.length < 8} className="w-full !py-4 !text-base">{busy ? "Creating…" : "Create account"}</Btn>
@@ -223,11 +223,11 @@ function EditDialog({ acc, isMe, onClose, onDone }: { acc: Account; isMe: boolea
         <div className="space-y-2 rounded-xl bg-white p-3">
           <label className="flex items-center gap-3">
             <input type="checkbox" checked={f.admin} disabled={isMe} onChange={(e) => setF({ ...f, admin: e.target.checked, super: e.target.checked && f.super })} className="h-5 w-5 accent-ink" />
-            <span><b>Admin</b> <span className="text-sm text-ink/60">edit website, run competition</span></span>
+            <span><b>Admin</b> <span className="text-sm text-ink/60">run the event &amp; competition</span></span>
           </label>
           <label className="flex items-center gap-3">
             <input type="checkbox" checked={f.super} disabled={isMe || !f.admin} onChange={(e) => setF({ ...f, super: e.target.checked })} className="h-5 w-5 accent-ink" />
-            <span><b>Super admin</b> <span className="text-sm text-ink/60">also manage accounts</span></span>
+            <span><b>Super admin</b> <span className="text-sm text-ink/60">also edit the website &amp; manage accounts</span></span>
           </label>
           <label className="flex items-center gap-3">
             <input type="checkbox" checked={f.banned} disabled={isMe} onChange={(e) => setF({ ...f, banned: e.target.checked })} className="h-5 w-5 accent-ink" />

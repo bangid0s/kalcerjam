@@ -11,9 +11,9 @@ export async function refreshSiteContent(accessToken: string): Promise<{ ok: boo
   if (!userRes.ok) return { ok: false };
   const { email } = (await userRes.json()) as { email?: string };
   if (!email) return { ok: false };
-  // RLS only returns kj_admins rows to admins, so a non-empty result proves admin rights.
-  const adminRes = await fetch(`${SUPABASE_URL}/rest/v1/kj_admins?select=email&email=eq.${encodeURIComponent(email.toLowerCase())}`, { headers: auth, cache: "no-store" });
-  if (!adminRes.ok || ((await adminRes.json()) as unknown[]).length === 0) return { ok: false };
+  // RLS only returns kj_admins rows to admins; website edits also need the super flag.
+  const adminRes = await fetch(`${SUPABASE_URL}/rest/v1/kj_admins?select=email,super&email=eq.${encodeURIComponent(email.toLowerCase())}`, { headers: auth, cache: "no-store" });
+  if (!adminRes.ok || !((await adminRes.json()) as { super?: boolean }[])[0]?.super) return { ok: false };
   updateTag(CONTENT_TAG);
   return { ok: true };
 }
