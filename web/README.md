@@ -83,3 +83,11 @@ The bracket / 7 to Smoke logic is in `src/lib/tournament.ts` with tests (`npm te
 4. Optional: enable the Google provider, then switch on **Event settings → Google login** in `/admin`.
 5. `/admin` → Register & RSVP → **Payment info**: real bank / QRIS / PayPal details.
 6. On 1 April: in `/dashboard` → Competition, switch **Registration open** on per category.
+
+### Super admins & accounts
+
+Super admins (`kj_admins.super = true`, set for info@mjfird.com) get a **★ Accounts** tab in `/dashboard`: create a login with email + password and a role (judge, MC, team, dancer, spectator), make someone an admin or super admin, reset passwords, change emails, block, or delete accounts.
+
+These actions run in the Supabase Edge Function `kj-admin-users` (`supabase/functions/kj-admin-users`), which uses the service-role key on Supabase's side and refuses anyone who isn't a super admin. Deploy changes with `supabase functions deploy kj-admin-users --no-verify-jwt` (the function checks the caller itself).
+
+People with a password sign in at `/dashboard` → **Password**; everyone else can keep using the email link.

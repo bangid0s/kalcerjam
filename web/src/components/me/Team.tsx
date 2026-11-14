@@ -4,15 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { errMsg, must, sb, type Category, type Entry, type Payment, type Profile, type Role } from "./data";
 import { Comp, log } from "./Comp";
 import { Show } from "./Show";
+import { Accounts } from "./Accounts";
 import type { Site } from "./MeApp";
 import { Btn, Card, Field, Notice, Pill, Stat, inputCls, useAction } from "./ui";
 
-type Tab = "show" | "run" | "checkin" | "payments" | "dancers" | "people" | "log";
+type Tab = "show" | "run" | "checkin" | "payments" | "dancers" | "people" | "accounts" | "log";
 
-export function Team({ isAdmin }: { isAdmin: boolean; site: Site }) {
+export function Team({ isAdmin, isSuper = false }: { isAdmin: boolean; isSuper?: boolean; site: Site }) {
   const [tab, setTab] = useState<Tab>("show");
   const [focus, setFocus] = useState<string | null>(null);
-  const tabs: [Tab, string][] = [["show", "▶ Run show"], ["run", "Categories"], ["checkin", "Check-in"], ["payments", "Payments"], ["dancers", "Dancers"], ...(isAdmin ? [["people", "Roles"] as [Tab, string]] : []), ["log", "Log"]];
+  const tabs: [Tab, string][] = [["show", "▶ Run show"], ["run", "Categories"], ["checkin", "Check-in"], ["payments", "Payments"], ["dancers", "Dancers"], ...(isAdmin ? [["people", "Roles"] as [Tab, string]] : []), ...(isSuper ? [["accounts", "★ Accounts"] as [Tab, string]] : []), ["log", "Log"]];
   return (
     <div className="space-y-5">
       <nav className="-mx-4 flex gap-1 overflow-x-auto px-4 pb-1 [scrollbar-width:none]" aria-label="Team tools">
@@ -26,6 +27,7 @@ export function Team({ isAdmin }: { isAdmin: boolean; site: Site }) {
       {tab === "payments" && <Payments />}
       {tab === "dancers" && <Dancers />}
       {tab === "people" && isAdmin && <People />}
+      {tab === "accounts" && isSuper && <Accounts />}
       {tab === "log" && <Log />}
     </div>
   );
