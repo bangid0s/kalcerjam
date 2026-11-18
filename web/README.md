@@ -75,6 +75,20 @@ Participant lists sync live (Realtime on `kj_entries`, migration `20261115000000
 Rules live in the database (`supabase/migrations/20261114000000_kalcerjam_competition.sql`), so they hold even if someone calls the API directly: eligibility (Bgirl, Kids U-12 with guardian, Over 35, by 26 Jul 2027), scoring only while a category is in prelims, voting only on the live battle, scores/votes hidden from the public, dancers see their own scores only after "Dancers can see their scores" is on.
 The bracket / 7 to Smoke logic is in `src/lib/tournament.ts` with tests (`npm test`).
 
+### Category modules & judging flow
+
+Every category is a module with a **format** (`kj_categories.format`, migration `20261118000000_kalcerjam_category_formats.sql`):
+
+| Format | How it runs |
+| --- | --- |
+| **7 to Smoke** | No prelims. Every confirmed dancer goes straight into the line (invited first, rest random, or set the order by hand). |
+| **Prelims → Bracket** | Judges score heats (Mind/Body/Soul), then a seeded Top 16/8/4 bracket. |
+| **Bracket only** | No prelims, random draw into a bracket. |
+
+Admins manage them in `/dashboard` → **Categories**: + New category, Edit, Duplicate, Delete (asks you to type the name if dancers already entered), and ↑↓ to reorder. The format locks once a category starts (reset it to change).
+
+Judges work in three steps: **Category → battle list (in running order, with Scored / To score / LIVE) → score → Next**. The live battle is pinned at the top; in 7 to Smoke and bracket voting the screen follows the stage to the next exchange by itself. Tapping **Judge** again goes back to step 1.
+
 ### Going live checklist
 
 1. Run the migration in the Supabase SQL editor (or `supabase db push`).
