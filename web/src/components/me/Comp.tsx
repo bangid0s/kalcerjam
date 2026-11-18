@@ -5,9 +5,10 @@ import {
   bracketSizeFor, firstRound, nextSlot, prelimPairs, propagate, rankPrelims, roundCount, roundLabel,
   smokeApply, smokeBattle, smokeLeaders, smokeStart, type Pairing, type Smoke,
 } from "@/lib/tournament";
-import { entryName, loadBoard, must, runOrder, sb, tallyFor, useLive, PHASES, type Battle, type Board, type Category, type Entry, type Payment, type ScoreRow, type Vote } from "./data";
+import { entryName, formatOf, loadBoard, must, runOrder, sb, tallyFor, useLive, FORMATS, PHASES, type Battle, type Board, type Category, type Entry, type Payment, type ScoreRow, type Vote } from "./data";
 import { BracketView, SmokeView } from "./boards";
 import { Btn, Card, Notice, Pill, useAction } from "./ui";
+import { Categories } from "./Categories";
 
 export type CompData = { board: Board; entries: Entry[]; payments: Payment[]; scores: ScoreRow[]; votes: Vote[] };
 
@@ -57,19 +58,24 @@ export function Comp({ isAdmin = false, initial = null }: { isAdmin?: boolean; i
   const [slug, setSlug] = useState<string | null>(initial);
   if (error) return <Notice kind="err">{error}</Notice>;
   if (!data) return <p>Loading…</p>;
-  const cat = data.board.cats.find((c) => c.slug === slug) ?? data.board.cats[0];
+  const cat = data.board.cats.find((c) => c.slug === slug);
   const live = data.board.battles.find((b) => b.status === "live");
-  if (!cat) return <Notice kind="info">No categories yet.</Notice>;
+  if (!cat) {
+    return (
+      <div className="space-y-5">
+        <Categories d={data} isAdmin={isAdmin} reload={reload} open={(s) => { setSlug(s); window.scrollTo(0, 0); }} />
+        {isAdmin && <DemoData d={data} reload={reload} />}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap gap-2">
-        {data.board.cats.map((c) => (
-          <button key={c.slug} onClick={() => setSlug(c.slug)} className={`rounded-full px-3 py-1.5 text-sm font-bold ${c.slug === cat.slug ? "bg-ink text-paper" : "bg-white"}`}>
-            {c.name} <span className="ml-1 opacity-60">{PHASES[c.phase]}</span>
-            {live?.category === c.slug && <span className="ml-1 inline-block h-2 w-2 rounded-full bg-stamp" />}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={() => setSlug(null)} className="rounded-full bg-white px-4 py-2 text-sm font-bold hover:bg-ink/10">‹ All categories</button>
+        <select value={cat.slug} onChange={(e) => setSlug(e.target.value)} className="rounded-full border-2 border-ink bg-white px-3 py-1.5 text-sm font-bold" aria-label="Switch category">
+          {data.board.cats.map((c) => <option key={c.slug} value={c.slug}>{c.name} · {PHASES[c.phase]}{live?.category === c.slug ? " · LIVE" : ""}</option>)}
+        </select>
       </div>
       {live && (
         <Notice kind="info">
@@ -79,7 +85,6 @@ export function Comp({ isAdmin = false, initial = null }: { isAdmin?: boolean; i
       )}
       <CategoryPanel key={cat.slug} d={data} cat={cat} reload={reload} />
       <Roster d={data} cat={cat} />
-      {isAdmin && <DemoData d={data} reload={reload} />}
     </div>
   );
 }
@@ -114,16 +119,14 @@ function CategoryPanel({ d, cat, reload }: { d: CompData; cat: Category; reload:
 
   return (
     <div className="space-y-5">
-      <Card title={cat.name} aside={<Pill tone="ink">{PHASES[cat.phase]}</Pill>}>
+      <Card title={cat.name} aside={<span className="flex gap-1"><Pill>{FORMATS[formatOf(cat)].name}</Pill><Pill tone="ink">{PHASES[cat.phase]}</Pill></span>}>
         {note && <div className="mb-3">{note}</div>}
+        <p className="mb-3 text-sm text-ink/60">{FORMATS[formatOf(cat)].about}</p>
         <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <Toggle label="Registration open" on={cat.registration_open} onClick={() => setCat({ registration_open: !cat.registration_open })} disabled={busy} />
           <Toggle label="Dancers can see their scores" on={cat.results_published} onClick={() => setCat({ results_published: !cat.results_published })} disabled={busy} />
           {cat.smoke ? (
-            <>
-              <NumberSetting label="Prelim qualifiers" value={cat.smoke_qualifiers} min={0} max={16} disabled={busy || cat.phase !== "setup" && cat.phase !== "prelims"} onSave={(v) => setCat({ smoke_qualifiers: v })} />
-              <NumberSetting label="Points to win" value={cat.smoke_target} min={1} max={20} disabled={busy || cat.phase === "smoke"} onSave={(v) => setCat({ smoke_target: v })} />
-            </>
+            <NumberSetting label="Points to win" value={cat.smoke_target} min={1} max={20} disabled={busy || cat.phase === "smoke"} onSave={(v) => setCat({ smoke_target: v })} />
           ) : (
             <label className="flex items-center gap-2"><span className="font-semibold">Max bracket</span>
               <select disabled={busy || cat.phase === "bracket" || cat.phase === "finished"} value={cat.bracket_size} onChange={(e) => setCat({ bracket_size: Number(e.target.value) })} className="rounded border-2 border-ink px-2 py-1">
@@ -138,11 +141,17 @@ function CategoryPanel({ d, cat, reload }: { d: CompData; cat: Category; reload:
           {conf.some((e) => e.invited) && <> Includes {conf.filter((e) => e.invited).length} invited.</>}
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
-          {cat.phase === "setup" && (
+          {cat.phase === "setup" && formatOf(cat) === "smoke" && (
+            <SmokeLineup d={d} cat={cat} pool={smokePool(d, cat)} reload={reload} label={`Set line-up → start 7 to Smoke (${conf.length})`} />
+          )}
+          {cat.phase === "setup" && formatOf(cat) === "prelims_bracket" && (
             <>
               <Btn disabled={busy} onClick={startPrelims}>Draw prelim heats</Btn>
-              {cat.smoke ? <SmokeLineup d={d} cat={cat} pool={conf.map((e) => e.id)} reload={reload} label="Skip prelims → 7 to Smoke" /> : <Btn kind="ghost" disabled={busy} onClick={() => go(() => buildBracket(cat, shuffle(conf.map((e) => e.id))), "Bracket built with a random draw.")}>Skip prelims → random bracket</Btn>}
+              <Btn kind="ghost" disabled={busy} onClick={() => go(() => buildBracket(cat, shuffle(conf.map((e) => e.id))), "Bracket built with a random draw.")}>Skip prelims → random bracket</Btn>
             </>
+          )}
+          {cat.phase === "setup" && formatOf(cat) === "bracket" && (
+            <Btn disabled={busy || conf.length < 2} onClick={() => go(() => buildBracket(cat, shuffle(conf.map((e) => e.id))), "Bracket built with a random draw.")}>Draw bracket ({conf.length} dancers)</Btn>
           )}
           <Btn kind="danger" disabled={busy || cat.phase === "setup" && !battles.length} onClick={reset}>Reset category</Btn>
         </div>
@@ -173,7 +182,7 @@ function NumberSetting({ label, value, min, max, onSave, disabled }: { label: st
   );
 }
 
-const shuffle = <X,>(xs: X[]) => {
+export const shuffle = <X,>(xs: X[]) => {
   const a = [...xs];
   for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
   return a;
@@ -188,15 +197,8 @@ function Prelims({ d, cat, reload }: { d: CompData; cat: Category; reload: () =>
   const ranked = rankPrelims(ids, d.scores.filter((s) => ids.includes(s.entry_id)));
   const panel = Math.max(d.board.judges, 1);
   const go = (fn: () => Promise<unknown>, ok?: string) => run(async () => { await fn(); await reload(); }, ok);
-  const invited = confirmed(d, cat).filter((e) => e.invited).map((e) => e.id);
-  const cut = cat.smoke ? cat.smoke_qualifiers : bracketSizeFor(ranked.length, cat.bracket_size);
+  const cut = bracketSizeFor(ranked.length, cat.bracket_size);
   const missing = ranked.filter((r) => r.judges < panel).length;
-
-  const saveSeeds = () => go(async () => {
-    const top = ranked.slice(0, cut).map((r) => r.entry);
-    for (const [i, id] of top.entries()) await must(sb().from("kj_entries").update({ seed: i + 1 }).eq("id", id));
-    await log("prelims.lock", { category: cat.slug, qualified: top });
-  });
 
   const build = () => {
     if (missing && !confirm(`${missing} dancer(s) don't have scores from every judge yet. Build anyway?`)) return;
@@ -206,8 +208,8 @@ function Prelims({ d, cat, reload }: { d: CompData; cat: Category; reload: () =>
       const top = ranked.slice(0, cut).map((r) => r.entry);
       for (const [i, id] of top.entries()) await must(sb().from("kj_entries").update({ seed: i + 1 }).eq("id", id));
       await log("prelims.lock", { category: cat.slug, qualified: top });
-      if (!cat.smoke) await buildBracket(cat, top);
-    }, cat.smoke ? "Seeds saved. Set the 7 to Smoke line below." : "Bracket built.");
+      await buildBracket(cat, top);
+    }, "Bracket built.");
   };
 
   return (
@@ -251,13 +253,9 @@ function Prelims({ d, cat, reload }: { d: CompData; cat: Category; reload: () =>
             </tbody>
           </table>
         </div>
-        <p className="mt-3 text-sm text-ink/60">Ties break on Soul, then Mind, then Body. <span className="text-stamp">*</span> = still level. Highlighted rows go through ({cut}{cat.smoke ? ` qualifiers + ${invited.length} invited` : ""}).</p>
+        <p className="mt-3 text-sm text-ink/60">Ties break on Soul, then Mind, then Body. <span className="text-stamp">*</span> = still level. Highlighted rows go through ({cut}).</p>
         <div className="mt-4 flex flex-wrap gap-2">
-          {cat.smoke ? (
-            <SmokeLineup d={d} cat={cat} pool={[...invited, ...ranked.slice(0, cut).map((r) => r.entry)]} reload={reload} label="Lock prelims → 7 to Smoke" before={saveSeeds} />
-          ) : (
-            <Btn disabled={busy || ranked.length < 2} onClick={build}>Lock scores → build {roundLabel(bracketSizeFor(ranked.length, cat.bracket_size), 1)} bracket</Btn>
-          )}
+          <Btn disabled={busy || ranked.length < 2} onClick={build}>Lock scores → build {roundLabel(bracketSizeFor(ranked.length, cat.bracket_size), 1)} bracket</Btn>
         </div>
       </Card>
     </>
@@ -381,7 +379,7 @@ function BattleRow({ d, b, busy, onStage, decide, extra }: { d: CompData; b: Bat
 
 // ---------------- 7 to Smoke ----------------
 
-function SmokeLineup({ d, cat, pool, reload, label, before }: { d: CompData; cat: Category; pool: number[]; reload: () => Promise<void>; label: string; before?: () => void }) {
+function SmokeLineup({ d, cat, pool, reload, label }: { d: CompData; cat: Category; pool: number[]; reload: () => Promise<void>; label: string }) {
   const [open, setOpen] = useState(false);
   const [order, setOrder] = useState<number[]>(pool);
   const { busy, run, note } = useAction();
@@ -390,7 +388,7 @@ function SmokeLineup({ d, cat, pool, reload, label, before }: { d: CompData; cat
     await startSmoke(cat, order);
     await reload();
   });
-  if (!open) return <Btn kind="ink" onClick={() => { before?.(); setOrder(pool); setOpen(true); }}>{label}</Btn>;
+  if (!open) return <Btn kind="ink" onClick={() => { setOrder(pool); setOpen(true); }}>{label}</Btn>;
   return (
     <div className="w-full rounded-xl bg-paper p-4">
       <p className="font-bold">7 to Smoke line-up</p>
@@ -408,7 +406,7 @@ function SmokeLineup({ d, cat, pool, reload, label, before }: { d: CompData; cat
       </ol>
       <div className="mt-3 flex flex-wrap gap-2">
         <Btn kind="ghost" onClick={() => setOrder(shuffle(order))}>Shuffle</Btn>
-        <Btn disabled={busy} onClick={start}>Start 7 to Smoke</Btn>
+        <Btn disabled={busy || order.length < 2} onClick={start}>Start 7 to Smoke ({order.length})</Btn>
         <Btn kind="ghost" onClick={() => setOpen(false)}>Cancel</Btn>
       </div>
       {note && <div className="mt-2">{note}</div>}
@@ -495,6 +493,7 @@ function SmokeRun({ d, cat, reload }: { d: CompData; cat: Category; reload: () =
 
 /** Draw random prelim heats from every confirmed, non-invited entry. */
 export async function drawPrelims(d: CompData, cat: Category) {
+  if (formatOf(cat) !== "prelims_bracket") throw new Error(`${cat.name} has no prelims (${FORMATS[formatOf(cat)].name}).`);
   const pool = confirmed(d, cat).filter((e) => !e.invited).map((e) => e.id);
   if (pool.length < 2) throw new Error("Need at least 2 confirmed dancers for prelims.");
   const rows = prelimPairs(pool).map((p, i) => ({ category: cat.slug, kind: "prelim", round: 1, slot: i + 1, a_entry: p.a, b_entry: p.b }));
@@ -503,27 +502,32 @@ export async function drawPrelims(d: CompData, cat: Category) {
   await log("prelims.start", { category: cat.slug, heats: rows.length });
 }
 
+/** 7 to Smoke line-up: every confirmed dancer, invited guests first, the rest in random order. */
+export function smokePool(d: CompData, cat: Category): number[] {
+  const conf = confirmed(d, cat);
+  return [...conf.filter((e) => e.invited).map((e) => e.id), ...shuffle(conf.filter((e) => !e.invited).map((e) => e.id))];
+}
+
 /** Prelim ranking for a category plus where the cut falls. */
 export function prelimStanding(d: CompData, cat: Category) {
   const heats = d.board.battles.filter((b) => b.category === cat.slug && b.kind === "prelim");
   const ids = [...new Set(heats.flatMap((h) => [h.a_entry, h.b_entry]).filter((x): x is number => !!x))];
   const ranked = rankPrelims(ids, d.scores.filter((s) => ids.includes(s.entry_id)));
-  const cut = cat.smoke ? cat.smoke_qualifiers : bracketSizeFor(ranked.length, cat.bracket_size);
+  const cut = bracketSizeFor(ranked.length, cat.bracket_size);
   const panel = Math.max(d.board.judges, 1);
   const missing = ranked.filter((r) => r.judges < panel).length;
   const cutTie = !!(ranked[cut - 1] && ranked[cut] && ranked[cut - 1].rank === ranked[cut].rank);
   return { heats, ranked, cut, panel, missing, cutTie };
 }
 
-/** Lock prelim scores: seed the qualifiers, then build the bracket or start 7 to Smoke (invited first, then by rank). */
+/** Lock prelim scores: seed the qualifiers, then build the bracket. */
 export async function lockPrelims(d: CompData, cat: Category) {
   const { ranked, cut } = prelimStanding(d, cat);
   const top = ranked.slice(0, cut).map((r) => r.entry);
   for (const [i, id] of top.entries()) await must(sb().from("kj_entries").update({ seed: i + 1 }).eq("id", id));
   await must(sb().from("kj_battles").update({ status: "done" }).eq("category", cat.slug).eq("kind", "prelim"));
   await log("prelims.lock", { category: cat.slug, qualified: top });
-  if (cat.smoke) await startSmoke(cat, [...confirmed(d, cat).filter((e) => e.invited).map((e) => e.id), ...top]);
-  else await buildBracket(cat, top);
+  await buildBracket(cat, top);
 }
 
 export async function startSmoke(cat: Category, order: number[]) {
@@ -628,7 +632,7 @@ function DemoData({ d, reload }: { d: CompData; reload: () => Promise<void> }) {
     await must(sb().from("kj_entries").insert(rows));
     await log("demo.load", { entries: rows.length });
     await reload();
-  }, "Demo dancers added. Pick a category above and press “Draw prelim heats”.");
+  }, "Demo dancers added. Open a category above and press Start.");
   const clear = () => {
     if (!confirm("Remove all demo dancers and reset every category that used them (heats, scores, votes, brackets)?")) return;
     run(async () => {

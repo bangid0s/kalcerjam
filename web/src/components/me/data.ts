@@ -14,8 +14,9 @@ export type Profile = {
   country: string; birth_date: string | null; gender: "f" | "m" | "x" | null; phone: string; instagram: string;
   guardian_name: string; lang: "en" | "id"; pass_token: string; checked_in_at: string | null;
 };
+export type Format = "smoke" | "prelims_bracket" | "bracket";
 export type Category = {
-  slug: string; name: string; sort: number; rule: "open" | "bgirl" | "u12" | "o35"; team: boolean; smoke: boolean;
+  slug: string; name: string; sort: number; rule: "open" | "bgirl" | "u12" | "o35"; team: boolean; smoke: boolean; format?: Format;
   registration_open: boolean; phase: Phase; bracket_size: number; smoke_qualifiers: number; smoke_target: number;
   age_ref_date: string; results_published: boolean;
 };
@@ -110,5 +111,16 @@ export function tallyFor(votes: Vote[], battle: Battle, panel: number) {
   const picks = votes.filter((v) => v.battle_id === battle.id && v.vote_round === battle.vote_round).map((v) => v.pick);
   return tally(picks, Math.max(panel, 1));
 }
+
+/** The category's format (falls back to the old `smoke` flag if the format migration isn't applied yet). */
+export const formatOf = (c: Category): Format => c.format ?? (c.smoke ? "smoke" : "prelims_bracket");
+
+export const FORMATS: Record<Format, { name: string; short: string; about: string; steps: string[] }> = {
+  smoke: { name: "7 to Smoke", short: "7 to Smoke", about: "No prelims. Every confirmed dancer goes straight into the line. Winner stays on the floor and takes a point; first to 7 is King.", steps: ["Entries", "7 to Smoke", "Champion"] },
+  prelims_bracket: { name: "Prelims → Bracket", short: "Prelims + Bracket", about: "Judges score every dancer in prelim heats (Mind, Body, Soul). The best go into a seeded Top 16/8/4 bracket decided by judge votes.", steps: ["Entries", "Prelims", "Bracket", "Champion"] },
+  bracket: { name: "Bracket only", short: "Bracket", about: "No prelims. Dancers are drawn at random into a bracket; every battle is decided by judge votes.", steps: ["Entries", "Bracket", "Champion"] },
+};
+
+export const RULES: Record<Category["rule"], string> = { open: "Open to everyone", bgirl: "Bgirls only", u12: "Kids under 12 (guardian needed)", o35: "35 and over" };
 
 export const PHASES: Record<Phase, string> = { setup: "Registration", prelims: "Prelims", bracket: "Bracket", smoke: "7 to Smoke", finished: "Finished" };

@@ -2,15 +2,21 @@
 
 import { useState } from "react";
 import { roundLabel } from "@/lib/tournament";
-import { entryName, must, sb, tallyFor, useLive, type Battle, type Category } from "./data";
+import { entryName, formatOf, must, sb, tallyFor, useLive, FORMATS, type Battle, type Category } from "./data";
 import { battleTitle } from "./boards";
 import {
-  confirmed, decide, drawPrelims, extraRound, loadComp, lockPrelims, prelimStanding, putOnStage, readyQueue, startSmoke, type CompData,
+  buildBracket, confirmed, decide, shuffle, drawPrelims, extraRound, loadComp, lockPrelims, prelimStanding, putOnStage, readyQueue, smokePool, startSmoke, type CompData,
 } from "./Comp";
 import { Notice, Pill, useAction } from "./ui";
 
-const STEPS = ["Entries", "Prelims", "Battles", "Champion"] as const;
-const stepOf = (c: Category) => (c.phase === "setup" ? 0 : c.phase === "prelims" ? 1 : c.phase === "finished" ? 3 : 2);
+/** Where a category is on its own format's steps (7 to Smoke and bracket-only have no prelims step). */
+function stepOf(c: Category) {
+  const steps = FORMATS[formatOf(c)].steps;
+  if (c.phase === "setup") return 0;
+  if (c.phase === "finished") return steps.length - 1;
+  if (c.phase === "prelims") return 1;
+  return steps.length - 2;
+}
 
 /** The one screen the team needs during the show: what's on stage, one tap to decide, one tap for what's next. */
 export function Show({ openCategory }: { openCategory: (slug: string) => void }) {
@@ -158,6 +164,8 @@ function CategoryStep({ d, cat, busy, live, open, act }: {
   d: CompData; cat: Category; busy: boolean; live: Battle | null; open: () => void; act: (fn: () => Promise<unknown>, ok?: string) => void;
 }) {
   const step = stepOf(cat);
+  const fmt = formatOf(cat);
+  const STEPS = FORMATS[fmt].steps;
   const conf = confirmed(d, cat);
   const pool = conf.filter((e) => !e.invited).length;
   const mine = d.board.battles.filter((b) => b.category === cat.slug);
@@ -170,7 +178,12 @@ function CategoryStep({ d, cat, busy, live, open, act }: {
 
   if (cat.phase === "setup") {
     status = `${conf.length} ready to battle${cat.team ? " (teams)" : ""}`;
-    if (cat.smoke && pool < 2 && conf.length >= 2) primary = { label: `Start 7 to Smoke (${conf.length})`, onClick: () => confirm(`Start 7 to Smoke with ${conf.length} dancers, no prelims?`) && act(() => startSmoke(cat, conf.map((e) => e.id))) };
+    if (fmt === "smoke") primary = conf.length >= 2
+      ? { label: `Start 7 to Smoke (${conf.length})`, onClick: () => confirm(`Start 7 to Smoke with all ${conf.length} dancers?\n\nLine-up: invited first, the rest random. To set the order yourself, use Details.`) && act(() => startSmoke(cat, smokePool(d, cat)), "7 to Smoke started. Call the first exchange.") }
+      : { label: "Waiting for dancers", onClick: () => {}, disabled: true };
+    else if (fmt === "bracket") primary = conf.length >= 2
+      ? { label: `Draw bracket (${conf.length})`, onClick: () => confirm(`Draw a random bracket for ${conf.length} dancers in ${cat.name}?`) && act(() => buildBracket(cat, shuffle(conf.map((e) => e.id))), "Bracket drawn.") }
+      : { label: "Waiting for dancers", onClick: () => {}, disabled: true };
     else primary = pool >= 2
       ? { label: `Start prelims (${pool} dancers)`, onClick: () => confirm(`Draw random prelim heats for ${pool} dancers in ${cat.name}?`) && act(() => drawPrelims(d, cat), "Heats drawn. Tap Call next heat.") }
       : { label: "Waiting for dancers", onClick: () => {}, disabled: true };
@@ -181,10 +194,10 @@ function CategoryStep({ d, cat, busy, live, open, act }: {
     primary = queue.length
       ? { label: isLiveHere ? "Heat on stage" : "Call next heat", onClick: call, disabled: isLiveHere }
       : {
-          label: cat.smoke ? `Lock scores → 7 to Smoke` : `Lock scores → build Top ${Math.min(cut, ranked.length)}`,
+          label: `Lock scores → build Top ${Math.min(cut, ranked.length)}`,
           onClick: () => {
             const warn = [missing ? `${missing} dancer(s) are missing scores from some judges.` : "", cutTie ? "There's a tie on the cut line (lower entry goes through)." : ""].filter(Boolean).join(" ");
-            if (confirm(`${warn ? warn + "\n\n" : ""}Lock prelim scores for ${cat.name}? Judges can't change them afterwards.`)) act(() => lockPrelims(d, cat), cat.smoke ? "7 to Smoke ready." : "Bracket built.");
+            if (confirm(`${warn ? warn + "\n\n" : ""}Lock prelim scores for ${cat.name}? Judges can't change them afterwards.`)) act(() => lockPrelims(d, cat), "Bracket built.");
           },
         };
   } else if (cat.phase === "bracket") {
