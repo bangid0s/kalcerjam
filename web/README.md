@@ -45,6 +45,19 @@ All site copy lives in Supabase (project **KalcerJam**) and is edited at **`/adm
 - Images upload to the public `kj-media` storage bucket.
 - Schema and security rules: `supabase/migrations/`.
 
+### Setting up a new Supabase project
+
+If the project is ever lost (login fails with a network error and `<ref>.supabase.co` no longer resolves):
+
+1. Create a project in the Supabase dashboard.
+2. SQL Editor → paste all of `supabase/setup.sql` → **Run** (once). It applies every migration and makes `info@mjfird.com` the first super admin.
+3. Authentication → Users → **Add user** `info@mjfird.com` with a password, tick "Auto confirm".
+4. Edge Functions → **Deploy a new function** → name it `kj-admin-users` → paste `supabase/functions/kj-admin-users/index.ts` → Deploy (needed for the Accounts tab).
+5. Authentication → URL Configuration: set **Site URL** to the live site and add `https://<site>/dashboard` under Redirect URLs (email-link and Google sign-in).
+6. Put the new Project URL and publishable key in `src/lib/supabase-env.ts` (or as `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` on the host) and redeploy.
+
+`setup.sql` is generated from `supabase/migrations/`; when you add a migration, regenerate it.
+
 ### Adding an admin
 
 1. Supabase dashboard → Authentication → Users → **Add user** (email + password, tick "Auto confirm").
