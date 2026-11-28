@@ -74,7 +74,7 @@ Everyone signs in at **`/dashboard`** with an email link (or Google, once enable
 | --- | --- |
 | **spectator** (default) | Free QR pass (RSVP), schedule, live link. Can switch to dancer. |
 | **participant** | Dancer ID (KJ-0042), profile, category entry (eligibility checked), 2vs2 partner invites, payment proof, QR pass once paid, own battles, own prelim scores once published. |
-| **judge** | Live Mind/Body/Soul score sheet for prelim heats; A / B / extra-round vote for bracket battles and 7 to Smoke exchanges. |
+| **judge** | Only the categories they sit on the panel for: live Mind/Body/Soul score sheet for prelim heats; A / B / extra-round vote for bracket battles. 7 to Smoke has no judge votes (the team taps each winner). |
 | **mc** | Run sheet: on stage, up next, results to announce, champions, boards. Read only. |
 | **team** | Competition runner (draw heats → ranking → bracket or 7 to Smoke, stage control, vote tallies, walkovers, undo), check-in desk (camera QR scan), payment verification, dancer roster (transfers, invited dancers, CSV), audit log. |
 
@@ -120,3 +120,18 @@ Super admins (`kj_admins.super = true`, set for info@mjfird.com) also get a **�
 These actions run in the Supabase Edge Function `kj-admin-users` (`supabase/functions/kj-admin-users`), which uses the service-role key on Supabase's side and refuses anyone who isn't a super admin. Deploy changes with `supabase functions deploy kj-admin-users --no-verify-jwt` (the function checks the caller itself).
 
 People with a password sign in at `/dashboard` → **Password**; everyone else can keep using the email link.
+
+### Judge panels
+
+Each category has its own panel of judges (`kj_category_judges`).
+
+- **When you give someone the judge role** (Team → **Roles**, or ★ **Accounts**), you pick their categories in the same step. At least one is required, and the role and categories save together or not at all (`kj_set_judge`). The Roles list shows each judge's categories with a **Change** link.
+- You can also adjust a panel later from **Categories → Judge panels** or a category's **Judge panel** card.
+- When someone stops being a judge, they leave the panels of categories that haven't started.
+
+- Only judges on a category's panel see it, score its prelims and vote on its bracket battles. The database enforces this, not only the app.
+- Strict: a Prelims → Bracket or Bracket-only category can't start without at least one judge on its panel.
+- Majorities and the "scored by every judge" checks count that category's panel, not every judge account.
+- The team can change a panel during registration. Once the category starts it is locked; admins can still change it after a confirmation. Scores and votes from judges taken off a panel stay saved but stop counting.
+- 7 to Smoke has no panel: the team taps the winner of every exchange.
+

@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { rankPrelims, roundLabel } from "@/lib/tournament";
-import { BOARD_TABLES, PHASES, entryName, loadBoard, must, sb, useLive, type Battle, type Board, type Category, type ScoreRow, type Vote } from "./data";
+import { BOARD_TABLES, PHASES, entryName, loadBoard, must, needsPanel, panelOf, sb, useLive, type Battle, type Board, type Category, type ScoreRow, type Vote } from "./data";
 import { BracketView, SmokeView } from "./boards";
 import { Card, Notice, Pill, useAction } from "./ui";
 
-type JudgeData = { board: Board; votes: Vote[]; scores: ScoreRow[] };
+type JudgeData = { board: Board; votes: Vote[]; scores: ScoreRow[]; preview: boolean; uid: string };
 type Tab = "judge" | "participants" | "brackets" | "rules";
 
 const buzz = (ms = 12) => { try { navigator.vibrate?.(ms); } catch {} };
@@ -32,7 +32,7 @@ export function Judge({ uid, preview, onBecomeJudge }: { uid: string; preview: b
       must(sb().from("kj_votes").select("*").eq("judge_id", uid)),
       must(sb().from("kj_scores").select("*").eq("judge_id", uid)),
     ]);
-    return { board, votes: votes as Vote[], scores: scores as ScoreRow[] };
+    return { board, votes: votes as Vote[], scores: scores as ScoreRow[], preview, uid };
   }, BOARD_TABLES, 8000);
   const [tab, setTab] = useState<Tab>("judge");
   const [home, setHome] = useState(0); // bumps when Judge is tapped again: back to step 1
@@ -72,8 +72,11 @@ export function Judge({ uid, preview, onBecomeJudge }: { uid: string; preview: b
   );
 }
 
-/** A battle the judge can score or vote on, in the order it runs. */
-const judgeable = (b: Battle) => !!b.a_entry && (b.kind === "prelim" || !!b.b_entry);
+/** A battle a judge can score or vote on: prelim heats and bracket battles. 7 to Smoke is decided by the team. */
+const judgeable = (b: Battle) => !!b.a_entry && (b.kind === "prelim" || (b.kind === "bracket" && !!b.b_entry));
+
+/** Is this judge on the category's panel? In preview (a non-judge looking around) every category is shown. */
+const onPanel = (data: JudgeData, slug: string) => data.preview || panelOf(data.board, slug).includes(data.uid);
 
 /** Battles of one category in running order. Byes and empty future slots are left out. */
 function orderFor(board: Board, slug: string) {
@@ -104,7 +107,8 @@ function JudgeNow({ data, uid, reload, home }: { data: JudgeData; uid: string; r
   if (home !== lastHome) { setLastHome(home); setSlug(null); setItem(null); setFollow(false); }
 
   const live = board.battles.find((b) => b.status === "live") ?? null;
-  const cat = board.cats.find((c) => c.slug === slug);
+  // If the judge is taken off this category's panel while it's open, drop back to the category list.
+  const cat = board.cats.find((c) => c.slug === slug && onPanel(data, c.slug));
   const list = cat ? orderFor(board, cat.slug) : [];
   let current = item != null ? board.battles.find((b) => b.id === item) ?? null : null;
   // Following the stage: when the battle you voted on is decided and the next one in this category goes live, move to it.
@@ -131,12 +135,24 @@ function JudgeNow({ data, uid, reload, home }: { data: JudgeData; uid: string; r
 
   // ---------- Step 1: categories ----------
   if (!cat) {
-    const active = board.cats.filter((c) => c.phase === "prelims" || c.phase === "bracket" || c.phase === "smoke");
-    const rest = board.cats.filter((c) => !active.includes(c));
+    const mine = board.cats.filter((c) => needsPanel(c) && onPanel(data, c.slug));
+    const active = mine.filter((c) => c.phase === "prelims" || c.phase === "bracket");
+    const rest = mine.filter((c) => !active.includes(c));
+    const liveCat = live ? board.cats.find((c) => c.slug === live.category) : undefined;
+    const liveMine = !!live && judgeable(live) && onPanel(data, live.category);
     return (
       <div className="space-y-3">
         {crumbs}
-        {live && judgeable(live) && (
+        {live && !liveMine && liveCat && (
+          <div className="flex items-center gap-3 rounded-3xl bg-white/70 p-4">
+            <span className="h-3 w-3 shrink-0 animate-pulse rounded-full bg-ink/30" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-xs font-bold uppercase tracking-wide text-ink/55">On stage now · {liveCat.name}</span>
+              <span className="block text-ink/75">{live.kind === "smoke" ? "7 to Smoke: the team calls every exchange. Nothing to tap." : "Not your panel. Take a break."}</span>
+            </span>
+          </div>
+        )}
+        {live && liveMine && (
           <button onClick={() => open(live.category, live, live.kind !== "prelim")} className="flex w-full items-center gap-3 rounded-3xl bg-stamp p-4 text-left text-white active:scale-[.99]">
             <span className="h-3 w-3 shrink-0 animate-pulse rounded-full bg-white" />
             <span className="min-w-0 flex-1">
@@ -147,11 +163,12 @@ function JudgeNow({ data, uid, reload, home }: { data: JudgeData; uid: string; r
           </button>
         )}
         <p className="display pt-2 text-3xl">Choose a category</p>
+        {!data.preview && <p className="-mt-2 text-sm text-ink/60">{mine.length ? `Your panels: ${mine.map((c) => c.name).join(", ")}` : "You're not on any judge panel yet. Ask the team to add you to the categories you'll judge."}</p>}
         {active.length === 0 && (
           <div className="rounded-3xl bg-ink px-5 py-10 text-center text-paper">
             <span className="mx-auto block h-3 w-3 animate-pulse rounded-full bg-kj" />
             <p className="display mt-4 text-3xl">Nothing to judge yet</p>
-            <p className="mt-2 text-paper/60">Categories appear here as soon as the team starts them.</p>
+            <p className="mt-2 text-paper/60">{mine.length ? "Your categories appear here as soon as the team starts them." : "Only categories you're on the panel for show up here."}</p>
           </div>
         )}
         <ul className="space-y-2">
@@ -159,7 +176,7 @@ function JudgeNow({ data, uid, reload, home }: { data: JudgeData; uid: string; r
             const items = orderFor(board, c.slug);
             const done = items.filter((b) => doneByMe(data, b)).length;
             const isLive = live?.category === c.slug;
-            const sub = c.phase === "prelims" ? `Prelims · you scored ${done}/${items.length} heats` : c.phase === "smoke" ? `7 to Smoke · exchange ${items.length}` : `Bracket · ${items.filter((b) => b.status === "done").length}/${items.length} battles decided`;
+            const sub = c.phase === "prelims" ? `Prelims · you scored ${done}/${items.length} heats` : `Bracket · ${items.filter((b) => b.status === "done").length}/${items.length} battles decided`;
             return (
               <li key={c.slug}>
                 <button onClick={() => open(c.slug, null)} className={`flex min-h-20 w-full items-center gap-3 rounded-3xl p-4 text-left active:bg-kj ${isLive ? "bg-white ring-4 ring-stamp" : "bg-white"}`}>
@@ -177,13 +194,13 @@ function JudgeNow({ data, uid, reload, home }: { data: JudgeData; uid: string; r
         </ul>
         {rest.length > 0 && (
           <details className="rounded-3xl bg-white/60 p-4">
-            <summary className="cursor-pointer text-sm font-bold text-ink/60">Not started or finished ({rest.length})</summary>
+            <summary className="cursor-pointer text-sm font-bold text-ink/60">Your other categories: not started or finished ({rest.length})</summary>
             <ul className="mt-2 text-sm">
               {rest.map((c) => <li key={c.slug} className="flex justify-between border-t border-ink/10 py-2"><span>{c.name}</span><span className="text-ink/55">{PHASES[c.phase]}</span></li>)}
             </ul>
           </details>
         )}
-        {board.cats.filter((c) => c.phase === "prelims").map((c) => <MyOrder key={c.slug} data={data} slug={c.slug} name={c.name} />)}
+        {mine.filter((c) => c.phase === "prelims").map((c) => <MyOrder key={c.slug} data={data} slug={c.slug} name={c.name} />)}
       </div>
     );
   }
@@ -482,12 +499,13 @@ function Brackets({ board }: { board: Board }) {
 function Rules() {
   const rows: [string, string][] = [
     ["How to judge", "Tap Judge → choose a category → choose the heat or battle from the list (it's in running order) → score → Next. The live battle is always at the top."],
-    ["Prelims", "Only in Prelims → Bracket categories. Dancers are drawn into random pairs; each dances one round. Every judge scores every dancer on Mind, Body and Soul, 1 to 10 each (max 30 per judge)."],
-    ["Ranking", "A dancer's prelim total is the sum of all judges' scores. Ties break on Soul, then Mind, then Body. Anything still level is flagged for the team to settle."],
+    ["Your panels", "Each category has its own panel of judges, picked by the team. You only see, score and vote in the categories you're on the panel for. A majority is counted from that category's panel."],
+    ["Prelims", "Only in Prelims → Bracket categories. Dancers are drawn into random pairs; each dances one round. Every judge on the panel scores every dancer on Mind, Body and Soul, 1 to 10 each (max 30 per judge)."],
+    ["Ranking", "A dancer's prelim total is the sum of the panel's scores. Ties break on Soul, then Mind, then Body. Anything still level is flagged for the team to settle."],
     ["Top 16", "The best 16 (or fewer, by category size) are seeded 1 vs 16, 8 vs 9 and so on, so the top seeds can only meet late. Missing seeds become byes."],
     ["Battles", "From Top 16 to the final, judges vote A or B on their phones, the digital hand-raise. A majority of the panel wins."],
     ["Split", "If no side has a majority once everyone has voted (or you vote Extra round), the team calls an extra round and you vote again."],
-    ["7 to Smoke", "No prelims: every dancer goes straight into the line. Every exchange is a vote. The winner stays on the floor and gets a point; the loser goes to the back of the line. First to 7 is King. If time runs out, most points wins."],
+    ["7 to Smoke", "No prelims and no judge votes: the team calls the winner of every exchange on stage. The winner stays on the floor and gets a point; the loser goes to the back of the line. First to 7 is King. If time runs out, most points wins."],
     ["Privacy", "Your scores and votes are only seen by the event team. The public sees winners only. Dancers see their own prelim scores after the event, without judge names."],
     ["Final call", "The team confirms every result on stage. They can override for walkovers, injuries or a manual hand-raise if phones fail."],
   ];

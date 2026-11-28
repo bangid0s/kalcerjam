@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { sb } from "@/components/admin/supabase";
-import { tally, type Pick } from "@/lib/tournament";
+import { fromPanel, tally, type Pick } from "@/lib/tournament";
 
 export { sb };
 
@@ -76,27 +76,44 @@ export type Board = {
   battles: Battle[];
   entries: Map<number, PublicEntry>;
   smoke: Map<string, SmokeRow>;
-  judges: number;
+  /** Judge ids on each category's panel (accounts that still have the judge role). Crew only. */
+  panels: Map<string, string[]>;
 };
 
-/** Everything the live views need: categories, battles, entry names, smoke boards and the panel size. */
+/** Everything the live views need: categories, battles, entry names, smoke boards and judge panels. */
 export async function loadBoard(): Promise<Board> {
-  const [cats, battles, entries, smoke, judges] = await Promise.all([
+  const [cats, battles, entries, smoke, seats, judges] = await Promise.all([
     must(sb().from("kj_categories").select("*").order("sort")),
     must(sb().from("kj_battles").select("*").order("id")),
     must(sb().from("kj_public_entries").select("*")),
     must(sb().from("kj_smoke").select("*")),
-    sb().from("kj_people").select("id", { count: "exact", head: true }).eq("role", "judge"),
+    // Panels are crew-only; for anyone else these come back empty. Before the panels migration the table is missing: treat as empty.
+    sb().from("kj_category_judges").select("category, judge_id"),
+    sb().from("kj_people").select("id").eq("role", "judge"),
   ]);
+  const isJudge = new Set(((judges.data ?? []) as { id: string }[]).map((j) => j.id));
+  const panels = new Map<string, string[]>();
+  for (const s of (seats.data ?? []) as PanelSeat[]) {
+    if (!isJudge.has(s.judge_id)) continue;
+    panels.set(s.category, [...(panels.get(s.category) ?? []), s.judge_id]);
+  }
   return {
     cats: cats as Category[],
     battles: battles as Battle[],
     entries: new Map((entries as PublicEntry[]).map((e) => [e.id, e])),
     smoke: new Map((smoke as SmokeRow[]).map((s) => [s.category, s])),
-    judges: judges.count ?? 0,
+    panels,
   };
 }
-export const BOARD_TABLES = ["kj_battles", "kj_smoke", "kj_categories", "kj_entries"];
+export const BOARD_TABLES = ["kj_battles", "kj_smoke", "kj_categories", "kj_entries", "kj_category_judges"];
+
+export type PanelSeat = { category: string; judge_id: string };
+
+/** The judges on a category's panel. 7 to Smoke never has one: the team decides each exchange. */
+export const panelOf = (b: Board, slug: string): string[] => b.panels.get(slug) ?? [];
+
+/** Does this category need a judge panel? Only formats with prelim scores or bracket votes do. */
+export const needsPanel = (c: Category) => formatOf(c) !== "smoke";
 
 export const entryName = (b: Board | null, id: number | null | undefined) => (id == null ? "TBA" : b?.entries.get(id)?.label ?? `#${id}`);
 
@@ -107,18 +124,19 @@ export function runOrder(b: Board): Battle[] {
   return [...b.battles].sort((x, y) => (sort.get(x.category) ?? 0) - (sort.get(y.category) ?? 0) || kind[x.kind] - kind[y.kind] || x.round - y.round || x.slot - y.slot);
 }
 
-export function tallyFor(votes: Vote[], battle: Battle, panel: number) {
-  const picks = votes.filter((v) => v.battle_id === battle.id && v.vote_round === battle.vote_round).map((v) => v.pick);
-  return tally(picks, Math.max(panel, 1));
+/** Vote count for the battle's current round. Only judges on the panel count; the majority is of the panel. */
+export function tallyFor(votes: Vote[], battle: Battle, panel: string[]) {
+  const picks = fromPanel(votes.filter((v) => v.battle_id === battle.id && v.vote_round === battle.vote_round), panel).map((v) => v.pick);
+  return tally(picks, Math.max(panel.length, 1));
 }
 
 /** The category's format (falls back to the old `smoke` flag if the format migration isn't applied yet). */
 export const formatOf = (c: Category): Format => c.format ?? (c.smoke ? "smoke" : "prelims_bracket");
 
 export const FORMATS: Record<Format, { name: string; short: string; about: string; steps: string[] }> = {
-  smoke: { name: "7 to Smoke", short: "7 to Smoke", about: "No prelims. Every confirmed dancer goes straight into the line. Winner stays on the floor and takes a point; first to 7 is King.", steps: ["Entries", "7 to Smoke", "Champion"] },
-  prelims_bracket: { name: "Prelims → Bracket", short: "Prelims + Bracket", about: "Judges score every dancer in prelim heats (Mind, Body, Soul). The best go into a seeded Top 16/8/4 bracket decided by judge votes.", steps: ["Entries", "Prelims", "Bracket", "Champion"] },
-  bracket: { name: "Bracket only", short: "Bracket", about: "No prelims. Dancers are drawn at random into a bracket; every battle is decided by judge votes.", steps: ["Entries", "Bracket", "Champion"] },
+  smoke: { name: "7 to Smoke", short: "7 to Smoke", about: "No prelims and no judge panel. Every confirmed dancer goes straight into the line; the team taps the winner of each exchange. Winner stays on the floor and takes a point; first to 7 is King.", steps: ["Entries", "7 to Smoke", "Champion"] },
+  prelims_bracket: { name: "Prelims → Bracket", short: "Prelims + Bracket", about: "The category's judge panel scores every dancer in prelim heats (Mind, Body, Soul). The best go into a seeded Top 16/8/4 bracket decided by the panel's votes.", steps: ["Entries", "Prelims", "Bracket", "Champion"] },
+  bracket: { name: "Bracket only", short: "Bracket", about: "No prelims. Dancers are drawn at random into a bracket; every battle is decided by the panel's votes.", steps: ["Entries", "Bracket", "Champion"] },
 };
 
 export const RULES: Record<Category["rule"], string> = { open: "Open to everyone", bgirl: "Bgirls only", u12: "Kids under 12 (guardian needed)", o35: "35 and over" };

@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ageOn, bracketSizeFor, firstRound, ineligible, prelimPairs, propagate, rankPrelims, roundLabel, seedOrder,
+  ageOn, bracketSizeFor, firstRound, fromPanel, ineligible, panelIssue, prelimPairs, propagate, rankPrelims, roundLabel, seedOrder,
   smokeApply, smokeBattle, smokeLeaders, smokeStart, tally, type Pairing, type Smoke,
 } from "./tournament.ts";
 
@@ -116,4 +116,26 @@ test("eligibility mirrors the database rules", () => {
   assert.equal(ineligible("o35", { birth_date: "1992-07-26", gender: "m", guardian_name: "" }, ref), null);
   assert.equal(ineligible("bgirl", { birth_date: "2000-01-01", gender: "m", guardian_name: "" }, ref), "gender");
   assert.equal(ineligible("open", { birth_date: null, gender: null, guardian_name: "" }, ref), "profile");
+});
+
+test("panels: only the current panel's scores and votes count", () => {
+  const scores = [
+    { entry_id: 1, judge_id: "ana", mind: 9, body: 9, soul: 9 },
+    { entry_id: 1, judge_id: "old", mind: 1, body: 1, soul: 1 },
+    { entry_id: 2, judge_id: "ana", mind: 8, body: 8, soul: 8 },
+    { entry_id: 2, judge_id: "old", mind: 10, body: 10, soul: 10 },
+  ];
+  const ranked = rankPrelims([1, 2], fromPanel(scores, ["ana"]));
+  assert.deepEqual(ranked.map((r) => [r.entry, r.total, r.judges]), [[1, 27, 1], [2, 24, 1]]);
+
+  // 3 of 5 judges sit on this panel: a 2–1 vote decides it instead of waiting for 5 votes.
+  const votes = [{ judge_id: "a", pick: "a" as const }, { judge_id: "b", pick: "a" as const }, { judge_id: "c", pick: "b" as const }];
+  assert.equal(tally(fromPanel(votes, ["a", "b", "c"]).map((v) => v.pick), 3).result, "a");
+  assert.equal(tally(votes.map((v) => v.pick), 5).result, "waiting");
+});
+
+test("panels: empty and even panels are flagged", () => {
+  assert.equal(panelIssue(0), "empty");
+  assert.equal(panelIssue(2), "even");
+  assert.equal(panelIssue(3), null);
 });

@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { roundLabel } from "@/lib/tournament";
-import { entryName, formatOf, must, sb, tallyFor, useLive, FORMATS, type Battle, type Category } from "./data";
+import { fromPanel } from "@/lib/tournament";
+import { entryName, formatOf, must, panelOf, sb, tallyFor, useLive, FORMATS, type Battle, type Category } from "./data";
 import { battleTitle } from "./boards";
 import {
-  buildBracket, confirmed, decide, shuffle, drawPrelims, extraRound, loadComp, lockPrelims, prelimStanding, putOnStage, readyQueue, smokePool, startSmoke, type CompData,
+  buildBracket, confirmed, decide, COMP_TABLES, shuffle, drawPrelims, extraRound, loadComp, lockPrelims, prelimStanding, putOnStage, readyQueue, smokePool, startSmoke, type CompData,
 } from "./Comp";
 import { Notice, Pill, useAction } from "./ui";
 
@@ -20,7 +21,7 @@ function stepOf(c: Category) {
 
 /** The one screen the team needs during the show: what's on stage, one tap to decide, one tap for what's next. */
 export function Show({ openCategory }: { openCategory: (slug: string) => void }) {
-  const { data: d, error, reload } = useLive(loadComp, ["kj_battles", "kj_smoke", "kj_categories", "kj_votes", "kj_scores", "kj_entries"], 6000);
+  const { data: d, error, reload } = useLive(loadComp, COMP_TABLES, 6000);
   const { busy, run, note } = useAction();
   const [autoNext, setAutoNext] = useState(true);
   if (error) return <Notice kind="err">{error}</Notice>;
@@ -87,7 +88,9 @@ function OnStage({ d, live, busy, autoNext, setAutoNext, onDecide, onExtra, onNe
   const cat = d.board.cats.find((c) => c.slug === live.category);
   const title = battleTitle(d.board, live);
   const ids = [live.a_entry, live.b_entry].filter((x): x is number => !!x);
-  const panel = Math.max(d.board.judges, 1);
+  const seats = panelOf(d.board, live.category);
+  const panel = Math.max(seats.length, 1);
+  const scores = fromPanel(d.scores, seats);
 
   return (
     <section className="rounded-2xl bg-ink p-5 text-paper">
@@ -100,7 +103,7 @@ function OnStage({ d, live, busy, autoNext, setAutoNext, onDecide, onExtra, onNe
         <>
           <div className="mt-3 grid gap-2">
             {ids.map((id) => {
-              const n = d.scores.filter((s) => s.entry_id === id).length;
+              const n = scores.filter((s) => s.entry_id === id).length;
               return (
                 <div key={id} className="flex items-center justify-between gap-3 rounded-xl bg-ink-2 p-3">
                   <span className="display text-3xl">{name(id)}</span>
@@ -126,24 +129,26 @@ function OnStage({ d, live, busy, autoNext, setAutoNext, onDecide, onExtra, onNe
 }
 
 function Decision({ d, b, busy, onDecide, onExtra }: { d: CompData; b: Battle; busy: boolean; onDecide: (b: Battle, w: number, walkover?: boolean) => void; onExtra: (b: Battle) => void }) {
-  const t = tallyFor(d.votes, b, d.board.judges);
-  const panel = Math.max(d.board.judges, 1);
+  const seats = panelOf(d.board, b.category);
+  const t = tallyFor(d.votes, b, seats);
+  const panel = Math.max(seats.length, 1);
   const name = (id: number | null) => entryName(d.board, id);
+  const teamCall = b.kind === "smoke"; // 7 to Smoke: no judge votes, the team taps the winner
   const side = (id: number, votes: number, hot: boolean) => (
     <button disabled={busy} onClick={() => confirm(`Confirm: ${name(id)} wins?`) && onDecide(b, id)}
       className={`flex min-h-24 flex-col justify-between rounded-2xl p-4 text-left disabled:opacity-50 ${hot ? "bg-kj text-ink" : "bg-ink-2 text-paper"}`}>
       <span className="display break-words text-[clamp(1.6rem,6vw,2.6rem)]">{name(id)}</span>
-      <span className="text-sm font-bold">{votes} vote{votes === 1 ? "" : "s"}{hot ? " · majority — tap to confirm" : " · tap to confirm"}</span>
+      <span className="text-sm font-bold">{teamCall ? "Tap if this dancer won" : `${votes} vote${votes === 1 ? "" : "s"}${hot ? " · majority — tap to confirm" : " · tap to confirm"}`}</span>
     </button>
   );
   return (
     <>
-      <div className="mt-3">
+      {teamCall ? <p className="mt-3 text-sm text-paper/60">7 to Smoke: you call it. Tap the winner of this exchange.</p> : <div className="mt-3">
         <div className="flex h-2 overflow-hidden rounded-full bg-ink-2" aria-label={`${t.cast} of ${panel} judges voted`}>
           <span className="bg-paper/70" style={{ width: `${(t.cast / panel) * 100}%` }} />
         </div>
         <p className="mt-1 text-sm text-paper/60">{t.cast}/{panel} judges voted{t.tie ? ` · ${t.tie} asked for extra` : ""}{t.result === "split" ? " · split — call an extra round" : ""}</p>
-      </div>
+      </div>}
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {side(b.a_entry!, t.a, t.result === "a")}
         {side(b.b_entry!, t.b, t.result === "b")}
@@ -178,7 +183,10 @@ function CategoryStep({ d, cat, busy, live, open, act }: {
 
   if (cat.phase === "setup") {
     status = `${conf.length} ready to battle${cat.team ? " (teams)" : ""}`;
-    if (fmt === "smoke") primary = conf.length >= 2
+    if (fmt !== "smoke" && !panelOf(d.board, cat.slug).length) {
+      status += " · no judge panel yet";
+      primary = { label: "Add a judge panel first (Details)", onClick: open };
+    } else if (fmt === "smoke") primary = conf.length >= 2
       ? { label: `Start 7 to Smoke (${conf.length})`, onClick: () => confirm(`Start 7 to Smoke with all ${conf.length} dancers?\n\nLine-up: invited first, the rest random. To set the order yourself, use Details.`) && act(() => startSmoke(cat, smokePool(d, cat)), "7 to Smoke started. Call the first exchange.") }
       : { label: "Waiting for dancers", onClick: () => {}, disabled: true };
     else if (fmt === "bracket") primary = conf.length >= 2

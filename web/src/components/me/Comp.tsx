@@ -3,27 +3,37 @@
 import { useState } from "react";
 import {
   bracketSizeFor, firstRound, nextSlot, prelimPairs, propagate, rankPrelims, roundCount, roundLabel,
-  smokeApply, smokeBattle, smokeLeaders, smokeStart, type Pairing, type Smoke,
+  fromPanel, smokeApply, smokeBattle, smokeLeaders, smokeStart, type Pairing, type Smoke,
 } from "@/lib/tournament";
-import { entryName, formatOf, loadBoard, must, runOrder, sb, tallyFor, useLive, FORMATS, PHASES, type Battle, type Board, type Category, type Entry, type Payment, type ScoreRow, type Vote } from "./data";
+import { entryName, formatOf, loadBoard, must, needsPanel, panelOf, runOrder, sb, tallyFor, useLive, FORMATS, PHASES, type Battle, type Board, type Category, type Entry, type Payment, type ScoreRow, type Vote } from "./data";
 import { BracketView, SmokeView } from "./boards";
 import { Btn, Card, Notice, Pill, useAction } from "./ui";
 import { Categories } from "./Categories";
+import { PanelEditor, PanelsOverview, judgeName } from "./Panels";
 
-export type CompData = { board: Board; entries: Entry[]; payments: Payment[]; scores: ScoreRow[]; votes: Vote[] };
+export type JudgeInfo = { id: string; name: string; stage_name: string; email: string | null };
+export type CompData = { board: Board; entries: Entry[]; payments: Payment[]; scores: ScoreRow[]; votes: Vote[]; judges: JudgeInfo[] };
 
 export async function loadComp(): Promise<CompData> {
-  const [board, entries, payments, scores, votes] = await Promise.all([
+  const [board, entries, payments, scores, votes, judges] = await Promise.all([
     loadBoard(),
     must(sb().from("kj_entries").select("*").order("id")),
     must(sb().from("kj_payments").select("*")),
     must(sb().from("kj_scores").select("*")),
     must(sb().from("kj_votes").select("*")),
+    must(sb().from("kj_profiles").select("id, name, stage_name, email").eq("role", "judge").order("stage_name")),
   ]);
-  // The panel is everyone with the judge role, and never fewer than the judges who actually scored or voted.
-  const active = new Set([...(scores as ScoreRow[]).map((x) => x.judge_id), ...(votes as Vote[]).map((x) => x.judge_id)]);
-  board.judges = Math.max(board.judges, active.size);
-  return { board, entries: entries as Entry[], payments: payments as Payment[], scores: scores as ScoreRow[], votes: votes as Vote[] };
+  return { board, entries: entries as Entry[], payments: payments as Payment[], scores: scores as ScoreRow[], votes: votes as Vote[], judges: judges as JudgeInfo[] };
+}
+
+export const COMP_TABLES = ["kj_battles", "kj_smoke", "kj_categories", "kj_votes", "kj_scores", "kj_entries", "kj_category_judges"];
+
+/** Strict panels: a category that is scored or voted on can't start until it has at least one judge. */
+export async function assertPanel(cat: Category) {
+  if (!needsPanel(cat)) return;
+  const { count, error } = await sb().from("kj_category_judges").select("judge_id", { count: "exact", head: true }).eq("category", cat.slug);
+  if (error) throw new Error(`${error.message} — apply migration 20261119000000_kalcerjam_judge_panels.sql in Supabase first.`);
+  if (!count) throw new Error(`${cat.name} has no judge panel yet. Add judges under Judge panel before starting it.`);
 }
 
 export const log = (action: string, detail: Record<string, unknown>) => sb().from("kj_log").insert({ action, detail }).then(() => undefined);
@@ -54,7 +64,7 @@ export async function putOnStage(b: Battle | null) {
 }
 
 export function Comp({ isAdmin = false, initial = null }: { isAdmin?: boolean; initial?: string | null }) {
-  const { data, error, reload } = useLive(loadComp, ["kj_battles", "kj_smoke", "kj_categories", "kj_votes", "kj_scores", "kj_entries"], 8000);
+  const { data, error, reload } = useLive(loadComp, COMP_TABLES, 8000);
   const [slug, setSlug] = useState<string | null>(initial);
   if (error) return <Notice kind="err">{error}</Notice>;
   if (!data) return <p>Loading…</p>;
@@ -64,6 +74,7 @@ export function Comp({ isAdmin = false, initial = null }: { isAdmin?: boolean; i
     return (
       <div className="space-y-5">
         <Categories d={data} isAdmin={isAdmin} reload={reload} open={(s) => { setSlug(s); window.scrollTo(0, 0); }} />
+        <PanelsOverview d={data} isAdmin={isAdmin} reload={reload} />
         {isAdmin && <DemoData d={data} reload={reload} />}
       </div>
     );
@@ -83,13 +94,13 @@ export function Comp({ isAdmin = false, initial = null }: { isAdmin?: boolean; i
           <button className="underline" onClick={() => putOnStage(null).then(reload)}>Take off stage</button>
         </Notice>
       )}
-      <CategoryPanel key={cat.slug} d={data} cat={cat} reload={reload} />
+      <CategoryPanel key={cat.slug} d={data} cat={cat} isAdmin={isAdmin} reload={reload} />
       <Roster d={data} cat={cat} />
     </div>
   );
 }
 
-function CategoryPanel({ d, cat, reload }: { d: CompData; cat: Category; reload: () => Promise<void> }) {
+function CategoryPanel({ d, cat, isAdmin, reload }: { d: CompData; cat: Category; isAdmin: boolean; reload: () => Promise<void> }) {
   const { busy, run, note } = useAction();
   const conf = confirmed(d, cat);
   const all = d.entries.filter((e) => e.category === cat.slug && e.status === "active");
@@ -157,6 +168,10 @@ function CategoryPanel({ d, cat, reload }: { d: CompData; cat: Category; reload:
         </div>
       </Card>
 
+      <Card title="Judge panel" aside={needsPanel(cat) ? <span className="text-sm text-ink/60">{panelOf(d.board, cat.slug).length} judge{panelOf(d.board, cat.slug).length === 1 ? "" : "s"}</span> : undefined}>
+        <PanelEditor d={d} cat={cat} isAdmin={isAdmin} reload={reload} />
+      </Card>
+
       {cat.phase === "prelims" && <Prelims d={d} cat={cat} reload={reload} />}
       {(cat.phase === "bracket" || (cat.phase === "finished" && !cat.smoke)) && <BracketRun d={d} cat={cat} reload={reload} />}
       {(cat.phase === "smoke" || (cat.phase === "finished" && cat.smoke)) && <SmokeRun d={d} cat={cat} reload={reload} />}
@@ -194,8 +209,10 @@ function Prelims({ d, cat, reload }: { d: CompData; cat: Category; reload: () =>
   const { busy, run, note } = useAction();
   const heats = d.board.battles.filter((b) => b.category === cat.slug && b.kind === "prelim").sort((x, y) => x.slot - y.slot);
   const ids = [...new Set(heats.flatMap((h) => [h.a_entry, h.b_entry]).filter((x): x is number => !!x))];
-  const ranked = rankPrelims(ids, d.scores.filter((s) => ids.includes(s.entry_id)));
-  const panel = Math.max(d.board.judges, 1);
+  const seats = panelOf(d.board, cat.slug);
+  const scores = fromPanel(d.scores, seats);
+  const ranked = rankPrelims(ids, scores.filter((s) => ids.includes(s.entry_id)));
+  const panel = Math.max(seats.length, 1);
   const go = (fn: () => Promise<unknown>, ok?: string) => run(async () => { await fn(); await reload(); }, ok);
   const cut = bracketSizeFor(ranked.length, cat.bracket_size);
   const missing = ranked.filter((r) => r.judges < panel).length;
@@ -214,12 +231,12 @@ function Prelims({ d, cat, reload }: { d: CompData; cat: Category; reload: () =>
 
   return (
     <>
-      <Card title="Prelim heats" aside={<span className="text-sm text-ink/60">Panel: {d.board.judges} judge{d.board.judges === 1 ? "" : "s"}</span>}>
+      <Card title="Prelim heats" aside={<span className="text-sm text-ink/60">Panel: {seats.length ? d.judges.filter((j) => seats.includes(j.id)).map(judgeName).join(", ") : "none"}</span>}>
         {note && <div className="mb-3">{note}</div>}
         <ul className="divide-y divide-ink/10">
           {heats.map((h) => {
             const hid = [h.a_entry, h.b_entry].filter((x): x is number => !!x);
-            const got = Math.min(...hid.map((id) => d.scores.filter((s) => s.entry_id === id).length));
+            const got = Math.min(...hid.map((id) => scores.filter((s) => s.entry_id === id).length));
             return (
               <li key={h.id} className={`flex flex-wrap items-center justify-between gap-2 py-2 ${h.status === "live" ? "-mx-2 rounded bg-stamp/10 px-2" : ""}`}>
                 <span><span className="text-sm text-ink/55">Heat {h.slot}</span> <b>{hid.map((id) => entryName(d.board, id)).join(" vs ")}</b>{hid.length === 1 && <span className="text-ink/55"> (solo)</span>}</span>
@@ -268,6 +285,7 @@ const toPairing = (b: Battle): Pairing => ({ round: b.round, slot: b.slot, a: b.
 
 export async function buildBracket(cat: Category, seeded: number[]) {
   if (seeded.length < 2) throw new Error("Need at least 2 dancers for a bracket.");
+  await assertPanel(cat);
   const size = bracketSizeFor(seeded.length, cat.bracket_size);
   const top = seeded.slice(0, size);
   for (const [i, id] of top.entries()) await must(sb().from("kj_entries").update({ seed: i + 1 }).eq("id", id));
@@ -338,7 +356,8 @@ function BracketRun({ d, cat, reload }: { d: CompData; cat: Category; reload: ()
 }
 
 function BattleRow({ d, b, busy, onStage, decide, extra }: { d: CompData; b: Battle; busy: boolean; onStage: () => void; decide: (w: number | null, walkover?: boolean) => void; extra: () => void }) {
-  const t = tallyFor(d.votes, b, d.board.judges);
+  const seats = panelOf(d.board, b.category);
+  const t = tallyFor(d.votes, b, seats);
   const ready = !!b.a_entry && !!b.b_entry;
   const name = (id: number | null) => entryName(d.board, id);
   return (
@@ -354,7 +373,7 @@ function BattleRow({ d, b, busy, onStage, decide, extra }: { d: CompData; b: Bat
           {b.status === "live" && <Pill tone="live">LIVE</Pill>}
           {ready && !b.winner_entry && (
             <Pill tone={t.result === "split" ? "warn" : t.result === "waiting" ? "muted" : "ok"}>
-              Votes{b.vote_round > 1 ? ` (extra ${b.vote_round - 1})` : ""}: {t.a}–{t.b}{t.tie ? ` · ${t.tie} tie` : ""} · {t.cast}/{d.board.judges}
+              Votes{b.vote_round > 1 ? ` (extra ${b.vote_round - 1})` : ""}: {t.a}–{t.b}{t.tie ? ` · ${t.tie} tie` : ""} · {t.cast}/{seats.length}
             </Pill>
           )}
           {ready && !b.winner_entry && b.status !== "live" && <Btn kind="ghost" disabled={busy} onClick={onStage}>On stage</Btn>}
@@ -421,7 +440,6 @@ function SmokeRun({ d, cat, reload }: { d: CompData; cat: Category; reload: () =
   const cur = exchanges.find((b) => b.status !== "done");
   if (!row) return <Notice kind="info">No 7 to Smoke board yet.</Notice>;
   const state: Smoke = { onFloor: row.on_floor, queue: row.queue, points: row.points, champion: row.champion };
-  const t = cur ? tallyFor(d.votes, cur, d.board.judges) : null;
   const name = (id: number | null) => entryName(d.board, id);
 
   const crown = (champ: number) => smokeCrown(cat, champ);
@@ -461,14 +479,13 @@ function SmokeRun({ d, cat, reload }: { d: CompData; cat: Category; reload: () =
           <p className="display text-3xl">👑 {name(row.champion)}</p>
         ) : cur ? (
           <>
-            <p className="text-sm text-ink/60">Exchange {cur.slot}{cur.vote_round > 1 ? ` · extra round ${cur.vote_round - 1}` : ""}</p>
+            <p className="text-sm text-ink/60">Exchange {cur.slot}{cur.vote_round > 1 ? ` · extra round ${cur.vote_round - 1}` : ""} · the team decides, no judge votes</p>
             <p className="display text-3xl">{name(cur.a_entry)} <span className="text-ink/40">vs</span> {name(cur.b_entry)}</p>
-            {t && <p className="mt-1"><Pill tone={t.result === "split" ? "warn" : t.result === "waiting" ? "muted" : "ok"}>Votes: {t.a}–{t.b}{t.tie ? ` · ${t.tie} tie` : ""} · {t.cast}/{d.board.judges}</Pill></p>}
             <div className="mt-3 flex flex-wrap gap-2">
               {cur.status !== "live" && <Btn kind="ghost" disabled={busy} onClick={() => run(async () => { await putOnStage(cur); await reload(); })}>On stage</Btn>}
-              <Btn kind={t?.result === "a" ? "kj" : "ink"} disabled={busy} onClick={() => win(cur.a_entry!)}>{name(cur.a_entry)} wins</Btn>
-              <Btn kind={t?.result === "b" ? "kj" : "ink"} disabled={busy} onClick={() => win(cur.b_entry!)}>{name(cur.b_entry)} wins</Btn>
-              <Btn kind={t?.result === "split" ? "kj" : "ghost"} disabled={busy} onClick={() => run(async () => { await must(sb().from("kj_battles").update({ vote_round: cur.vote_round + 1 }).eq("id", cur.id)); await reload(); })}>Extra round</Btn>
+              <Btn disabled={busy} onClick={() => win(cur.a_entry!)}>{name(cur.a_entry)} wins</Btn>
+              <Btn disabled={busy} onClick={() => win(cur.b_entry!)}>{name(cur.b_entry)} wins</Btn>
+              <Btn kind="ghost" disabled={busy} onClick={() => run(async () => { await must(sb().from("kj_battles").update({ vote_round: cur.vote_round + 1 }).eq("id", cur.id)); await reload(); })}>Extra round</Btn>
             </div>
           </>
         ) : null}
@@ -496,6 +513,7 @@ export async function drawPrelims(d: CompData, cat: Category) {
   if (formatOf(cat) !== "prelims_bracket") throw new Error(`${cat.name} has no prelims (${FORMATS[formatOf(cat)].name}).`);
   const pool = confirmed(d, cat).filter((e) => !e.invited).map((e) => e.id);
   if (pool.length < 2) throw new Error("Need at least 2 confirmed dancers for prelims.");
+  await assertPanel(cat);
   const rows = prelimPairs(pool).map((p, i) => ({ category: cat.slug, kind: "prelim", round: 1, slot: i + 1, a_entry: p.a, b_entry: p.b }));
   await must(sb().from("kj_battles").insert(rows));
   await must(sb().from("kj_categories").update({ phase: "prelims" }).eq("slug", cat.slug));
@@ -512,9 +530,10 @@ export function smokePool(d: CompData, cat: Category): number[] {
 export function prelimStanding(d: CompData, cat: Category) {
   const heats = d.board.battles.filter((b) => b.category === cat.slug && b.kind === "prelim");
   const ids = [...new Set(heats.flatMap((h) => [h.a_entry, h.b_entry]).filter((x): x is number => !!x))];
-  const ranked = rankPrelims(ids, d.scores.filter((s) => ids.includes(s.entry_id)));
+  const seats = panelOf(d.board, cat.slug);
+  const ranked = rankPrelims(ids, fromPanel(d.scores, seats).filter((s) => ids.includes(s.entry_id)));
   const cut = bracketSizeFor(ranked.length, cat.bracket_size);
-  const panel = Math.max(d.board.judges, 1);
+  const panel = Math.max(seats.length, 1);
   const missing = ranked.filter((r) => r.judges < panel).length;
   const cutTie = !!(ranked[cut - 1] && ranked[cut] && ranked[cut - 1].rank === ranked[cut].rank);
   return { heats, ranked, cut, panel, missing, cutTie };
@@ -650,7 +669,7 @@ function DemoData({ d, reload }: { d: CompData; reload: () => Promise<void> }) {
   };
   return (
     <Card title="Rehearsal" aside={<span className="text-sm text-ink/55">Admins only</span>}>
-      <p className="text-sm text-ink/70">Load made-up dancers into every category to rehearse: draw heats, judge on phones, build brackets and run 7 to Smoke. Their names start with “Demo ·”. Clear them before the real event.</p>
+      <p className="text-sm text-ink/70">Load made-up dancers into every category to rehearse: draw heats, judge on phones, build brackets and run 7 to Smoke. Their names start with “Demo ·”. Clear them before the real event. Give each category a judge panel first, or it can&apos;t start.</p>
       <div className="mt-3 flex flex-wrap gap-2">
         <Btn disabled={busy || demo.length > 0} onClick={load}>Load demo dancers</Btn>
         <Btn kind="danger" disabled={busy || demo.length === 0} onClick={clear}>Clear demo data ({demo.length})</Btn>
