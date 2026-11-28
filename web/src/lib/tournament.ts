@@ -113,6 +113,20 @@ export function propagate(size: number, battles: Pairing[]): Pairing[] {
   return [...map.values()].sort((x, y) => x.round - y.round || x.slot - y.slot);
 }
 
+// ---------- Judge panels ----------
+
+/** Only rows from judges on the category's current panel count. A judge taken off the panel keeps
+ *  their rows in the database, but they drop out of rankings and tallies. */
+export const fromPanel = <R extends { judge_id: string }>(rows: R[], panel: readonly string[]): R[] => {
+  const on = new Set(panel);
+  return rows.filter((r) => on.has(r.judge_id));
+};
+
+/** Warnings for a panel before a category starts: none means it can't be judged; an even panel splits more often. */
+export function panelIssue(size: number): "empty" | "even" | null {
+  return size === 0 ? "empty" : size % 2 === 0 ? "even" : null;
+}
+
 // ---------- Judge votes ----------
 
 export type Pick = "a" | "b" | "tie";
