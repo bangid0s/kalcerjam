@@ -90,3 +90,49 @@ export function PanelsOverview({ d, isAdmin, reload }: { d: CompData; isAdmin: b
     </Card>
   );
 }
+
+// ---------------- Picking a judge's categories when giving the judge role ----------------
+
+export type JudgeSetup = { cats: Category[]; seats: Map<string, string[]> };
+
+/** Categories a judge can sit on (not 7 to Smoke) and every judge's current seats. */
+export async function loadJudgeSetup(): Promise<JudgeSetup> {
+  const [cats, seats] = await Promise.all([
+    must(sb().from("kj_categories").select("*").order("sort")),
+    must(sb().from("kj_category_judges").select("category, judge_id")),
+  ]);
+  const map = new Map<string, string[]>();
+  for (const s of seats as { category: string; judge_id: string }[]) map.set(s.judge_id, [...(map.get(s.judge_id) ?? []), s.category]);
+  return { cats: (cats as Category[]).filter(needsPanel), seats: map };
+}
+
+/** Give the judge role (admins) and set exactly which panels they sit on, in one step. */
+export const setJudge = (id: string, cats: string[]) => must(sb().rpc("kj_set_judge", { judge: id, cats }));
+
+/** Tick the categories this judge will judge. Started categories are locked for non-admins. */
+export function JudgeCategoryPicker({ cats, value, onChange, isAdmin, initial = [] }: { cats: Category[]; value: string[]; onChange: (v: string[]) => void; isAdmin: boolean; initial?: string[] }) {
+  if (!cats.length) return <p className="text-sm text-ink/60">No categories with judging yet. Add a Prelims → Bracket or Bracket category first.</p>;
+  return (
+    <div>
+      <span className="mb-1 block text-sm font-semibold">Judges these categories <span className="font-normal text-ink/55">(pick at least one)</span></span>
+      <div className="grid gap-1.5 sm:grid-cols-2">
+        {cats.map((c) => {
+          const on = value.includes(c.slug);
+          const locked = c.phase !== "setup" && !isAdmin;
+          return (
+            <label key={c.slug} className={`flex min-h-11 items-center gap-2 rounded-xl px-3 py-2 ${on ? "bg-ink text-paper" : "bg-white"} ${locked ? "opacity-50" : "cursor-pointer"}`}>
+              <input type="checkbox" checked={on} disabled={locked} className="h-5 w-5 accent-kj"
+                onChange={() => {
+                  if (c.phase !== "setup" && initial.includes(c.slug) !== !on && !confirm(`${c.name} has already started. Changing its panel changes totals and vote majorities. Continue?`)) return;
+                  onChange(on ? value.filter((s) => s !== c.slug) : [...value, c.slug]);
+                }} />
+              <span className="min-w-0 flex-1 font-bold">{c.name}</span>
+              {c.phase !== "setup" && <span className="text-xs opacity-70">{PHASES[c.phase]}</span>}
+            </label>
+          );
+        })}
+      </div>
+      <p className="mt-1 text-xs text-ink/55">7 to Smoke isn&apos;t listed: the team decides those exchanges.</p>
+    </div>
+  );
+}

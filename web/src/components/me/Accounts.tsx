@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { errMsg, sb, type Role } from "./data";
 import { Btn, Field, Notice, Pill, Stat, inputCls, useAction } from "./ui";
+import { JudgeCategoryPicker, loadJudgeSetup, setJudge, type JudgeSetup } from "./Panels";
 
 // Super admins only. All writes go through the kj-admin-users Edge Function, which holds the
 // Supabase service-role key on the server and checks that the caller is a super admin.
@@ -43,6 +44,7 @@ export function Accounts() {
   const [filter, setFilter] = useState<"all" | "crew" | Role>("all");
   const [editing, setEditing] = useState<Account | null>(null);
   const [creating, setCreating] = useState(false);
+  const [setup, setSetup] = useState<JudgeSetup>({ cats: [], seats: new Map() });
 
   const load = useCallback(async () => {
     try {
@@ -50,6 +52,7 @@ export function Accounts() {
       setRows(r.users);
       setMe(r.me);
       setErr("");
+      setSetup(await loadJudgeSetup().catch(() => ({ cats: [], seats: new Map() })));
     } catch (e) { setErr(errMsg(e)); }
   }, []);
   useEffect(() => { const f = setTimeout(load, 0); return () => clearTimeout(f); }, [load]);
@@ -102,8 +105,8 @@ export function Accounts() {
         {!shown.length && <li className="rounded-2xl bg-white p-6 text-center text-ink/55">No accounts match.</li>}
       </ul>
 
-      {creating && <CreateDialog onClose={() => setCreating(false)} onDone={async () => { setCreating(false); await load(); }} />}
-      {editing && <EditDialog acc={editing} isMe={editing.id === me} onClose={() => setEditing(null)} onDone={async () => { setEditing(null); await load(); }} />}
+      {creating && <CreateDialog setup={setup} onClose={() => setCreating(false)} onDone={async () => { setCreating(false); await load(); }} />}
+      {editing && <EditDialog setup={setup} acc={editing} isMe={editing.id === me} onClose={() => setEditing(null)} onDone={async () => { setEditing(null); await load(); }} />}
     </div>
   );
 }
@@ -147,14 +150,21 @@ function PasswordField({ value, onChange, label, placeholder }: { value: string;
   );
 }
 
-function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: () => Promise<void> }) {
+function CreateDialog({ setup, onClose, onDone }: { setup: JudgeSetup; onClose: () => void; onDone: () => Promise<void> }) {
   const [f, setF] = useState({ email: "", password: makePassword(), name: "", role: "judge" as Role, admin: false });
+  const [cats, setCats] = useState<string[]>([]);
   const { busy, run, note } = useAction();
   const [made, setMade] = useState<{ email: string; password: string } | null>(null);
+  const judge = f.role === "judge";
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     run(async () => {
-      await call({ action: "create", ...f });
+      // A judge is created as a spectator, then gets the judge role and their categories in one step.
+      const r = await call<{ ok: true; id: string }>({ action: "create", ...f, role: judge ? "spectator" : f.role });
+      if (judge) {
+        try { await setJudge(r.id, cats); }
+        catch (err) { throw new Error(`Account created, but the judge role wasn't set: ${errMsg(err)}. Open it from the list to try again.`); }
+      }
       setMade({ email: f.email.trim().toLowerCase(), password: f.password });
     });
   };
@@ -178,32 +188,39 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
         <PasswordField label="Password" value={f.password} onChange={(password) => setF({ ...f, password })} />
         <Field label="Name (optional)"><input value={f.name} maxLength={120} onChange={(e) => setF({ ...f, name: e.target.value })} className={inputCls} /></Field>
         <div><span className="mb-1 block text-sm font-semibold">Role</span><RolePicker value={f.role} onChange={(role) => setF({ ...f, role })} /></div>
+        {judge && <JudgeCategoryPicker cats={setup.cats} value={cats} onChange={setCats} isAdmin />}
         <label className="flex items-center gap-3 rounded-xl bg-white p-3">
           <input type="checkbox" checked={f.admin} onChange={(e) => setF({ ...f, admin: e.target.checked })} className="h-5 w-5 accent-ink" />
           <span><b>Admin</b><span className="block text-sm text-ink/60">Runs the event and competition, check-in, payments and roles. Can&apos;t edit the website.</span></span>
         </label>
         {note}
-        <Btn type="submit" disabled={busy || f.password.length < 8} className="w-full !py-4 !text-base">{busy ? "Creating…" : "Create account"}</Btn>
+        <Btn type="submit" disabled={busy || f.password.length < 8 || (judge && !cats.length)} className="w-full !py-4 !text-base">{busy ? "Creating…" : judge && !cats.length ? "Pick the judge's categories" : "Create account"}</Btn>
       </form>
     </Dialog>
   );
 }
 
-function EditDialog({ acc, isMe, onClose, onDone }: { acc: Account; isMe: boolean; onClose: () => void; onDone: () => Promise<void> }) {
+function EditDialog({ setup, acc, isMe, onClose, onDone }: { setup: JudgeSetup; acc: Account; isMe: boolean; onClose: () => void; onDone: () => Promise<void> }) {
   const [f, setF] = useState({ email: acc.email, password: "", name: acc.name, role: acc.role, admin: acc.admin, super: acc.super, banned: acc.banned });
+  const seats = acc.role === "judge" ? setup.seats.get(acc.id) ?? [] : [];
+  const [cats, setCats] = useState<string[]>(seats);
   const { busy, run, note } = useAction();
+  const judge = f.role === "judge";
+  const catsChanged = cats.length !== seats.length || cats.some((c) => !seats.includes(c));
   const save = (e: React.FormEvent) => {
     e.preventDefault();
+    if (acc.role === "judge" && !judge && !confirm(`${acc.email} stops being a judge and leaves the panels of categories that haven't started. Continue?`)) return;
     run(async () => {
       const body: Record<string, unknown> = { action: "update", id: acc.id };
       if (f.email.trim().toLowerCase() !== acc.email) body.email = f.email;
       if (f.password) body.password = f.password;
       if (f.name !== acc.name) body.name = f.name;
-      if (f.role !== acc.role) body.role = f.role;
+      if (f.role !== acc.role && !judge) body.role = f.role; // becoming a judge goes through setJudge below, with the categories
       if (f.admin !== acc.admin) body.admin = f.admin;
       if (f.super !== acc.super) body.super = f.super;
       if (f.banned !== acc.banned) body.banned = f.banned;
-      await call(body);
+      if (Object.keys(body).length > 2) await call(body);
+      if (judge && (acc.role !== "judge" || catsChanged)) await setJudge(acc.id, cats);
       await onDone();
     });
   };
@@ -220,6 +237,7 @@ function EditDialog({ acc, isMe, onClose, onDone }: { acc: Account; isMe: boolea
         <PasswordField label="New password (leave empty to keep)" value={f.password} placeholder="unchanged" onChange={(password) => setF({ ...f, password })} />
         <Field label="Name"><input value={f.name} maxLength={120} onChange={(e) => setF({ ...f, name: e.target.value })} className={inputCls} /></Field>
         <div><span className="mb-1 block text-sm font-semibold">Role</span><RolePicker value={f.role} onChange={(role) => setF({ ...f, role })} /></div>
+        {judge && <JudgeCategoryPicker cats={setup.cats} value={cats} initial={seats} onChange={setCats} isAdmin />}
         <div className="space-y-2 rounded-xl bg-white p-3">
           <label className="flex items-center gap-3">
             <input type="checkbox" checked={f.admin} disabled={isMe} onChange={(e) => setF({ ...f, admin: e.target.checked, super: e.target.checked && f.super })} className="h-5 w-5 accent-ink" />
@@ -235,7 +253,7 @@ function EditDialog({ acc, isMe, onClose, onDone }: { acc: Account; isMe: boolea
           </label>
         </div>
         {note}
-        <Btn type="submit" disabled={busy || (!!f.password && f.password.length < 8)} className="w-full !py-4 !text-base">{busy ? "Saving…" : "Save changes"}</Btn>
+        <Btn type="submit" disabled={busy || (!!f.password && f.password.length < 8) || (judge && !cats.length)} className="w-full !py-4 !text-base">{busy ? "Saving…" : judge && !cats.length ? "Pick the judge's categories" : "Save changes"}</Btn>
         {!isMe && <button type="button" onClick={remove} disabled={busy} className="w-full rounded-full py-3 font-bold text-stamp hover:bg-stamp hover:text-white">Delete account</button>}
       </form>
     </Dialog>

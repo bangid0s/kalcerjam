@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { errMsg, must, sb, type Category, type Entry, type Payment, type Profile, type Role } from "./data";
 import { Comp, log } from "./Comp";
 import { Show } from "./Show";
 import { Accounts } from "./Accounts";
+import { JudgeCategoryPicker, loadJudgeSetup, setJudge, type JudgeSetup } from "./Panels";
 import type { Site } from "./MeApp";
 import { Btn, Card, Field, Notice, Pill, Stat, inputCls, useAction } from "./ui";
 
@@ -383,7 +384,11 @@ const ROLES: Role[] = ["spectator", "participant", "judge", "mc", "team"];
 function People() {
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Profile[] | null>(null);
+  const [setup, setSetup] = useState<JudgeSetup | null>(null);
+  const [pick, setPick] = useState<{ id: string; cats: string[] } | null>(null); // judge whose categories are being picked
   const { busy, run, note } = useAction();
+  const reloadSetup = useCallback(() => loadJudgeSetup().then(setSetup).catch(() => setSetup({ cats: [], seats: new Map() })), []);
+  useEffect(() => { reloadSetup(); }, [reloadSetup]);
 
   const search = useCallback(async (term: string) => {
     const t = term.trim().replace(/[%,()]/g, "");
@@ -393,16 +398,27 @@ function People() {
   }, []);
   useEffect(() => { const f = setTimeout(() => search(""), 0); return () => clearTimeout(f); }, [search]);
 
-  const setRole = (p: Profile, role: Role) => run(async () => {
-    await must(sb().from("kj_profiles").update({ role }).eq("id", p.id));
-    await log("role.set", { who: p.email, role });
-    await search(q);
-  }, `${p.email} is now ${role}.`);
+  const setRole = (p: Profile, role: Role) => {
+    // A judge always gets their categories in the same step: open the picker instead of saving.
+    if (role === "judge") { setPick({ id: p.id, cats: setup?.seats.get(p.id) ?? [] }); return; }
+    if (p.role === "judge" && !confirm(`${p.email} stops being a judge and leaves the panels of categories that haven't started. Continue?`)) return;
+    run(async () => {
+      await must(sb().from("kj_profiles").update({ role }).eq("id", p.id));
+      await log("role.set", { who: p.email, role });
+      await Promise.all([search(q), reloadSetup()]);
+    }, `${p.email} is now ${role}.`);
+  };
+  const saveJudge = (p: Profile, cats: string[]) => run(async () => {
+    await setJudge(p.id, cats);
+    setPick(null);
+    await Promise.all([search(q), reloadSetup()]);
+  }, `${p.email} judges ${cats.length} categor${cats.length === 1 ? "y" : "ies"}.`);
+  const catName = (slug: string) => setup?.cats.find((c) => c.slug === slug)?.name ?? slug;
 
   return (
     <div className="space-y-4">
       <Card title="Roles">
-        <p className="mb-3 text-sm text-ink/65">Judges, MCs and team members sign in at <b>/dashboard</b> like anyone else, then you give them a role here. Leave the search empty to see the current crew.</p>
+        <p className="mb-3 text-sm text-ink/65">Judges, MCs and team members sign in at <b>/dashboard</b> like anyone else, then you give them a role here. When you make someone a judge you also pick the categories they judge; they can&apos;t see or judge any other. Leave the search empty to see the current crew.</p>
         <form onSubmit={(e) => { e.preventDefault(); run(() => search(q)); }} className="flex flex-wrap gap-2">
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Email, name or dancer ID" className={`${inputCls} max-w-md`} />
           <Btn type="submit" disabled={busy}>Search</Btn>
@@ -413,18 +429,41 @@ function People() {
         <table className="w-full text-left text-sm">
           <thead className="border-b border-ink/15 text-ink/60"><tr>{["ID", "Email", "Name", "Role"].map((h) => <th key={h} className="px-3 py-2.5 font-semibold">{h}</th>)}</tr></thead>
           <tbody>
-            {(rows ?? []).map((p) => (
-              <tr key={p.id} className="border-b border-ink/10 last:border-0">
-                <td className="px-3 py-2 font-bold">{p.code}</td>
-                <td className="px-3 py-2">{p.email}</td>
-                <td className="px-3 py-2">{p.stage_name || p.name || "—"}</td>
-                <td className="px-3 py-2">
-                  <select disabled={busy} value={p.role} onChange={(e) => setRole(p, e.target.value as Role)} className="rounded border-2 border-ink px-2 py-1 font-semibold">
-                    {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                </td>
-              </tr>
-            ))}
+            {(rows ?? []).map((p) => {
+              const seats = setup?.seats.get(p.id) ?? [];
+              const picking = pick?.id === p.id;
+              return (
+                <Fragment key={p.id}>
+                  <tr className={`border-b border-ink/10 last:border-0 ${picking ? "bg-kj/20" : ""}`}>
+                    <td className="px-3 py-2 font-bold">{p.code}</td>
+                    <td className="px-3 py-2">{p.email}</td>
+                    <td className="px-3 py-2">{p.stage_name || p.name || "—"}</td>
+                    <td className="px-3 py-2">
+                      <select disabled={busy || picking} value={picking ? "judge" : p.role} onChange={(e) => setRole(p, e.target.value as Role)} className="rounded border-2 border-ink px-2 py-1 font-semibold">
+                        {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                      {p.role === "judge" && !picking && (
+                        <div className="mt-1 text-xs">
+                          {seats.length ? <span className="text-ink/70">{seats.map(catName).join(", ")}</span> : <span className="font-bold text-stamp">No categories: can&apos;t judge anything</span>}
+                          {" "}<button disabled={busy} onClick={() => setPick({ id: p.id, cats: seats })} className="font-semibold underline">Change</button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                  {picking && setup && (
+                    <tr className="border-b border-ink/10 bg-kj/20">
+                      <td colSpan={4} className="space-y-3 px-3 pb-4 pt-1">
+                        <JudgeCategoryPicker cats={setup.cats} value={pick.cats} initial={seats} isAdmin onChange={(cats) => setPick({ id: p.id, cats })} />
+                        <div className="flex flex-wrap gap-2">
+                          <Btn disabled={busy || !pick.cats.length} onClick={() => saveJudge(p, pick.cats)}>{p.role === "judge" ? "Save categories" : `Make judge for ${pick.cats.length || "…"} categor${pick.cats.length === 1 ? "y" : "ies"}`}</Btn>
+                          <Btn kind="ghost" disabled={busy} onClick={() => setPick(null)}>Cancel</Btn>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
             {rows && !rows.length && <tr><td colSpan={4} className="px-3 py-6 text-center text-ink/55">No one found.</td></tr>}
           </tbody>
         </table>

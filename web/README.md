@@ -123,7 +123,11 @@ People with a password sign in at `/dashboard` → **Password**; everyone else c
 
 ### Judge panels
 
-Each category has its own panel of judges (`kj_category_judges`), set under **Team → competition → Judge panels** or in a category's **Judge panel** card.
+Each category has its own panel of judges (`kj_category_judges`).
+
+- **When you give someone the judge role** (Team → **Roles**, or ★ **Accounts**), you pick their categories in the same step. At least one is required, and the role and categories save together or not at all (`kj_set_judge`). The Roles list shows each judge's categories with a **Change** link.
+- You can also adjust a panel later from **Categories → Judge panels** or a category's **Judge panel** card.
+- When someone stops being a judge, they leave the panels of categories that haven't started.
 
 - Only judges on a category's panel see it, score its prelims and vote on its bracket battles. The database enforces this, not only the app.
 - Strict: a Prelims → Bracket or Bracket-only category can't start without at least one judge on its panel.
